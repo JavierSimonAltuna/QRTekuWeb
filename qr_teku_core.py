@@ -302,12 +302,22 @@ def load_excel(path: str) -> tuple[list[dict], str]:
         # HORA SALIDA PREVISTA (columna AB = índice 27, etiqueta "SALIDA PREV")
         hora_salida = ""
         for col in df.columns:
-            cu = str(col).upper().replace("\n", "").replace(" ", "").replace("\t", "")
-            if not hora_salida and ("SALIDAPREV" in cu or "SALIDA_PREV" in cu or cu == "SALIDA"):
+            cu = str(col).upper().replace("\r", "").replace("\n", "").replace(" ", "").replace("\t", "")
+            if not hora_salida and ("SALIDAPREV" in cu or "SALIDA_PREV" in cu or "HORASALIDA" in cu or cu == "SALIDA"):
                 hora_salida = _norm_hora(r.get(col, ""))
                 break
         if not hora_salida and len(df.columns) > 27:
             hora_salida = _norm_hora(r.iloc[27])
+
+        # COD. CENTRO (columna U = índice 20)
+        cod_centro = ""
+        for col in df.columns:
+            cu = str(col).upper().replace("\r", "").replace("\n", "").replace(" ", "").replace("\t", "").replace(".", "")
+            if not cod_centro and ("CODCENTRO" in cu or "CODCENT" in cu):
+                cod_centro = _safe_str(r.get(col, ""))
+                break
+        if not cod_centro and len(df.columns) > 20:
+            cod_centro = _safe_str(r.iloc[20])
 
         # Recoger todos los precintos con el mismo Nº viaje (cada uno con su centro)
         precintos_data = []
@@ -344,6 +354,7 @@ def load_excel(path: str) -> tuple[list[dict], str]:
             "playa": playa, "muelle": muelle,
             "hora_acule": hora_acule, "aculado": aculado,
             "hora_salida": hora_salida,
+            "cod_centro": cod_centro,
             "precinto": precinto,
             "precintos_data": precintos_data,
             "estado": "ready" if destino else "missing-cif",

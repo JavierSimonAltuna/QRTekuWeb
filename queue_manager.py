@@ -198,6 +198,7 @@ class QueueManager:
             "hora_salida": hora_salida,
             "hora_acule": row.get("hora_acule", ""),
             "expedicion": row.get("expedicion", ""),
+            "cod_centro": row.get("cod_centro", ""),
             "tipo_carga": "REFRIGERADO" if is_refr else "AMBIENTE",
             "agencia": row.get("agencia", ""),
             "cif": row.get("cif", ""),
