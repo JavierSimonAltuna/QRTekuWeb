@@ -1,0 +1,34 @@
+# UTF-8
+#
+# Metadatos del .exe (clic derecho > Propiedades > Detalles en Windows)
+#
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(3, 9, 0, 0),
+    prodvers=(3, 9, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        '040a04b0',
+        [
+          StringStruct('CompanyName',      'Garvasa Logística'),
+          StringStruct('FileDescription',  'QR Teku — Procesador de cargas'),
+          StringStruct('FileVersion',      '3.9.0.0'),
+          StringStruct('InternalName',     'QRTeku'),
+          StringStruct('LegalCopyright',   '© 2026 Garvasa Logística · Javier Simón-Altuna San Martín'),
+          StringStruct('OriginalFilename', 'QRTeku.exe'),
+          StringStruct('ProductName',      'QR Teku'),
+          StringStruct('ProductVersion',   '3.9.0.0'),
+        ]
+      )
+    ]),
+    VarFileInfo([VarStruct('Translation', [0x040a, 1200])])
+  ]
+)

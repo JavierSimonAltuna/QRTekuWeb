@@ -1,0 +1,13 @@
+# Dependencias del backend QR Teku · PyWebView
+pywebview>=5.0
+pandas>=2.0
+openpyxl>=3.1
+xlrd>=2.0
+qrcode[pil]>=7.4
+Pillow>=10.0
+python-docx>=1.1
+python-barcode>=0.15
+pyodbc>=5.0
+
+# Solo necesario para generar el .exe
+pyinstaller>=6.0

@@ -1,0 +1,18 @@
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Generados en runtime
+QR_WORDS/
+*.docx
+
+# IDE
+.vscode/
+.idea/
