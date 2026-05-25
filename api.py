@@ -265,6 +265,13 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def queue_reset_queued(self) -> dict:
+        """Borra todos los items pendientes (queued) para poder recargar el Excel."""
+        try:
+            return queue_manager.get_manager().reset_queued()
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     # ──────────────────────────────────────────────────────────────
     # COLA BLEECKER — Cargador
     # ──────────────────────────────────────────────────────────────

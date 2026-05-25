@@ -375,6 +375,14 @@ class QueueManager:
             self._save()
             return {"ok": True}
 
+    def reset_queued(self) -> dict:
+        """Borra solo los items en estado 'queued' (pendientes sin asignar)."""
+        with self._lock:
+            before = len([it for it in self._items if it["status"] == "queued"])
+            self._items = [it for it in self._items if it["status"] != "queued"]
+            self._save()
+            return {"ok": True, "removed": before}
+
 
 # Singleton
 _manager: Optional[QueueManager] = None

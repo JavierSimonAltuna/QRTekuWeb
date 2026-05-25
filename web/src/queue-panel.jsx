@@ -7,6 +7,7 @@ const { useState, useEffect, useCallback } = React;
 const QueuePanel = ({ pushToast }) => {
   const [snap, setSnap] = useState({ queued: [], assigned: [], done: [], loaders: [], counts: { queued: 0, assigned: 0, done: 0 } });
   const [reassignFor, setReassignFor] = useState(null); // item id
+  const [search, setSearch] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -45,6 +46,27 @@ const QueuePanel = ({ pushToast }) => {
     if (r.ok) { pushToast("Histórico limpiado", "success"); refresh(); }
   };
 
+  const handleResetQueued = async () => {
+    if (!confirm("¿Vaciar la cola de pendientes?\nRecarga el Excel para volver a encolarlos.")) return;
+    const r = await window.api.call("queue_reset_queued");
+    if (r.ok) { pushToast(`Cola vaciada (${r.removed} eliminadas)`, "success"); refresh(); }
+    else pushToast(r.error || "Error", "error");
+  };
+
+  const matchesSearch = (item) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      (item.destino || "").toLowerCase().includes(q) ||
+      (item.tractora || "").toLowerCase().includes(q) ||
+      (item.remolque || "").toLowerCase().includes(q) ||
+      (item.muelle || "").toLowerCase().includes(q) ||
+      (item.cod_centro || "").toLowerCase().includes(q) ||
+      (item.agencia || "").toLowerCase().includes(q) ||
+      (item.id || "").toLowerCase().includes(q)
+    );
+  };
+
   const loaderById = (id) => snap.loaders.find((l) => l.id === id);
 
   return (
@@ -59,11 +81,34 @@ const QueuePanel = ({ pushToast }) => {
           <IconRefresh size={14} />
           Refrescar
         </button>
+        {snap.counts.queued > 0 && (
+          <button onClick={handleResetQueued} style={QS.clearBtn} title="Vaciar cola de pendientes">
+            <IconTrash size={13} />
+            Vaciar cola
+          </button>
+        )}
         {snap.counts.done > 0 && (
-          <button onClick={handleResetDone} style={QS.clearBtn} title="Limpiar histórico">
+          <button onClick={handleResetDone} style={{ ...QS.clearBtn, marginLeft: 4 }} title="Limpiar histórico">
             <IconTrash size={13} />
             Limpiar histórico
           </button>
+        )}
+      </div>
+
+      {/* ─── Buscador ─── */}
+      <div style={QS.searchBar}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input
+          type="text"
+          placeholder="Buscar por destino, matrícula, muelle, cliente…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={QS.searchInput}
+        />
+        {search && (
+          <button onClick={() => setSearch("")} style={QS.searchClear}>✕</button>
         )}
       </div>
 
@@ -76,9 +121,12 @@ const QueuePanel = ({ pushToast }) => {
             <span style={QS.colCount}>{snap.queued.length}</span>
           </div>
           <div style={QS.list}>
-            {snap.queued.length === 0 ? (
-              <EmptyMini label="Sin cargas en cola" hint="Se añaden automáticamente cuando se detecta la hora de acule" />
-            ) : snap.queued.map((it, i) => (
+            {snap.queued.filter(matchesSearch).length === 0 ? (
+              <EmptyMini
+                label={search ? "Sin resultados" : "Sin cargas en cola"}
+                hint={search ? `No coincide ningún elemento con "${search}"` : "Se añaden automáticamente cuando se detecta la hora de acule"}
+              />
+            ) : snap.queued.filter(matchesSearch).map((it, i) => (
               <QueueCard
                 key={it.id}
                 item={it}
@@ -101,9 +149,12 @@ const QueuePanel = ({ pushToast }) => {
             <span style={QS.colCount}>{snap.assigned.length}</span>
           </div>
           <div style={QS.list}>
-            {snap.assigned.length === 0 ? (
-              <EmptyMini label="Ninguna carga en curso" hint="Cuando un cargador pida una carga aparecerá aquí" />
-            ) : snap.assigned.map((it) => (
+            {snap.assigned.filter(matchesSearch).length === 0 ? (
+              <EmptyMini
+                label={search ? "Sin resultados" : "Ninguna carga en curso"}
+                hint={search ? `No coincide ningún elemento con "${search}"` : "Cuando un cargador pida una carga aparecerá aquí"}
+              />
+            ) : snap.assigned.filter(matchesSearch).map((it) => (
               <AssignedCard
                 key={it.id}
                 item={it}
@@ -197,6 +248,7 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onRemove, onReassi
         <Meta label="Muelle" value={(item.muelle || "—").padStart(2, "0")} />
         <Meta label="Playa" value={item.playa || "—"} />
         <Meta label="Salida" value={item.hora_salida || "—"} />
+        {item.cod_centro && <Meta label="Cliente" value={item.cod_centro} />}
       </div>
       <div style={QS.cardTractora}>{item.tractora}</div>
     </div>
@@ -341,6 +393,9 @@ const QS = {
   stats: { display: "flex", alignItems: "center", padding: "14px 24px", background: "#fff", borderBottom: "1px solid #e7e5e4", flexShrink: 0 },
   refreshBtn: { display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: "#fafaf9", border: "1px solid #e7e5e4", borderRadius: 8, fontSize: 12, color: "#57534e", cursor: "pointer", fontFamily: "inherit", marginRight: 6 },
   clearBtn: { display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: "#fff", border: "1px solid #fecaca", borderRadius: 8, fontSize: 12, color: "#dc2626", cursor: "pointer", fontFamily: "inherit" },
+  searchBar: { display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", background: "#fff", borderBottom: "1px solid #e7e5e4", flexShrink: 0 },
+  searchInput: { flex: 1, padding: "6px 10px", border: "1px solid #e7e5e4", borderRadius: 8, fontSize: 12.5, fontFamily: "inherit", outline: "none", color: "#1c1917", background: "#fafaf9" },
+  searchClear: { background: "transparent", border: "none", color: "#a8a29e", cursor: "pointer", fontSize: 13, padding: "2px 6px", lineHeight: 1 },
 
   grid: { flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0, overflow: "hidden", minHeight: 0 },
   col: { display: "flex", flexDirection: "column", borderRight: "1px solid #e7e5e4", overflow: "hidden", minHeight: 0, background: "#fafaf9" },

@@ -123,6 +123,15 @@ def _norm_hora(v) -> str:
             return f"{h % 24:02d}:{m:02d}"
         except (ValueError, IndexError):
             return ""
+    # String que representa un float de fracción de día ("0.4583..." → 11:00)
+    # Ocurre cuando pandas lee con dtype=str una celda de tipo Time de Excel.
+    try:
+        f = float(s)
+        if 0 <= f < 1.0001:
+            total_min = int(round(f * 24 * 60))
+            return f"{(total_min // 60) % 24:02d}:{total_min % 60:02d}"
+    except (ValueError, TypeError):
+        pass
     return ""
 
 
@@ -248,6 +257,26 @@ def load_excel(path: str) -> tuple[list[dict], str]:
     raw.columns = _make_unique_columns(raw.iloc[hdr])
     df = raw.iloc[hdr + 1:].reset_index(drop=True).head(400)
 
+    # ── Detectar columnas con cabeceras multi-fila (filas anteriores a la fila DESTINO)
+    # Busca la columna cuyas filas de pre-cabecera contienen "SALIDA"+"PREV" y "COD"+"CENTRO"
+    _salida_prev_idx = None
+    _cod_centro_idx = None
+    if hdr > 0:
+        for ci in range(len(raw.columns)):
+            pre_vals = " ".join(
+                str(raw.iloc[ri, ci]).upper().strip()
+                for ri in range(hdr)
+                if str(raw.iloc[ri, ci]).strip().lower() not in ("", "nan", "none")
+            )
+            if _salida_prev_idx is None and "SALIDA" in pre_vals and "PREV" in pre_vals:
+                _salida_prev_idx = ci
+            if _cod_centro_idx is None and "COD" in pre_vals and "CENTRO" in pre_vals:
+                _cod_centro_idx = ci
+    if _salida_prev_idx is None and len(df.columns) > 27:
+        _salida_prev_idx = 27
+    if _cod_centro_idx is None and len(df.columns) > 20:
+        _cod_centro_idx = 20
+
     # Columna precinto (cualquier que contenga PRECINTO, o índice 30 = AE)
     precinto_col = None
     for c in df.columns:
@@ -299,25 +328,34 @@ def load_excel(path: str) -> tuple[list[dict], str]:
             hora_acule = _norm_hora(r.iloc[26])
         aculado = bool(hora_acule.strip())
 
-        # HORA SALIDA PREVISTA (columna AB = índice 27, etiqueta "SALIDA PREV")
+        # HORA SALIDA PREVISTA — columna detectada por cabecera o fallback AB (índice 27).
+        # '0.0'/'0' es una celda vacía con formato de hora en Excel → omitir para que
+        # _derive_salida pueda calcular hora_acule + 30 min como fallback.
         hora_salida = ""
-        for col in df.columns:
-            cu = str(col).upper().replace("\r", "").replace("\n", "").replace(" ", "").replace("\t", "")
-            if not hora_salida and ("SALIDAPREV" in cu or "SALIDA_PREV" in cu or "HORASALIDA" in cu or cu == "SALIDA"):
-                hora_salida = _norm_hora(r.get(col, ""))
-                break
-        if not hora_salida and len(df.columns) > 27:
-            hora_salida = _norm_hora(r.iloc[27])
+        if _salida_prev_idx is not None and _salida_prev_idx < len(df.columns):
+            raw_v = str(r.iloc[_salida_prev_idx]).strip()
+            if raw_v not in ("0.0", "0", "0.00", "", "nan"):
+                hora_salida = _norm_hora(r.iloc[_salida_prev_idx])
+        if not hora_salida:
+            for col in df.columns:
+                cu = str(col).upper().replace("\r", "").replace("\n", "").replace(" ", "").replace("\t", "")
+                if "SALIDAPREV" in cu or "SALIDA_PREV" in cu or "HORASALIDA" in cu:
+                    v = _norm_hora(r.get(col, ""))
+                    if v:
+                        hora_salida = v
+                        break
 
-        # COD. CENTRO (columna U = índice 20)
+        # COD. CENTRO — columna detectada por cabecera o fallback U (índice 20).
         cod_centro = ""
-        for col in df.columns:
-            cu = str(col).upper().replace("\r", "").replace("\n", "").replace(" ", "").replace("\t", "").replace(".", "")
-            if not cod_centro and ("CODCENTRO" in cu or "CODCENT" in cu):
-                cod_centro = _safe_str(r.get(col, ""))
-                break
-        if not cod_centro and len(df.columns) > 20:
-            cod_centro = _safe_str(r.iloc[20])
+        if _cod_centro_idx is not None and _cod_centro_idx < len(df.columns):
+            cod_centro = _safe_str(r.iloc[_cod_centro_idx])
+        if not cod_centro:
+            for col in df.columns:
+                cu = str(col).upper().replace("\r", "").replace("\n", "").replace(" ", "").replace("\t", "").replace(".", "")
+                if "CODCENTRO" in cu or "CODCENT" in cu:
+                    cod_centro = _safe_str(r.get(col, ""))
+                    if cod_centro:
+                        break
 
         # Recoger todos los precintos con el mismo Nº viaje (cada uno con su centro)
         precintos_data = []

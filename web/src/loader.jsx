@@ -298,6 +298,12 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize }) => {
             <span style={LS.muelleFootKey}>REMOLQUE</span> <span style={LS.muelleFootVal}>{item.remolque || "—"}</span>
             <span style={LS.muelleFootSep}>·</span>
             <span style={LS.muelleFootKey}>CAM</span> <span style={LS.muelleFootVal}>{(item.cam || "").toString().padStart(3, "0")}</span>
+            {item.cod_centro && (
+              <>
+                <span style={LS.muelleFootSep}>·</span>
+                <span style={LS.muelleFootKey}>CLIENTE</span> <span style={LS.muelleFootVal}>{item.cod_centro}</span>
+              </>
+            )}
           </div>
         </div>
 
