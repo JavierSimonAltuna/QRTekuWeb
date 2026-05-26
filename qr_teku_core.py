@@ -266,18 +266,38 @@ def load_excel(path: str) -> tuple[list[dict], str]:
         read_path = path
         tmp_path = None
 
-    # Detectar celdas verdes en columnas D y E (índices 3,4) — ANTES que pandas,
-    # y SOLO si tenemos una copia temporal (nunca sobre el original para evitar lock).
-    green_rows: set = set()
+    # Detectar filas verdes (ya_cargado) mapeando por Nº viaje — inmune a filtros/orden.
+    # Buscamos la fila de cabecera (DESTINO), localizamos la columna Nº,
+    # y recogemos los valores de n_viaje de las filas con celdas D y E verdes.
+    green_n_set: set = set()
     if not read_path.lower().endswith(".csv") and tmp_path is not None:
         try:
             import openpyxl as _opx
             _wb = _opx.load_workbook(read_path, read_only=False, data_only=True)
             try:
                 _ws = _wb.active
-                for _ri, _rcells in enumerate(_ws.iter_rows(), start=1):
-                    if len(_rcells) >= 5 and _is_green_fill(_rcells[3]) and _is_green_fill(_rcells[4]):
-                        green_rows.add(_ri)
+                _all_rows = list(_ws.iter_rows())
+                # Localizar fila de cabecera y columna Nº
+                _hdr_ri = None
+                _n_ci = None
+                for _ri, _rcells in enumerate(_all_rows):
+                    _vals = [str(c.value or "").strip().upper() for c in _rcells]
+                    if "DESTINO" in _vals:
+                        _hdr_ri = _ri
+                        for _ci, _v in enumerate(_vals):
+                            if _v in ("Nº", "N°", "NÚM", "NUM", "N") or (_v.startswith("N") and len(_v) <= 3):
+                                _n_ci = _ci
+                                break
+                        break
+                if _hdr_ri is not None:
+                    for _ri, _rcells in enumerate(_all_rows):
+                        if _ri <= _hdr_ri:
+                            continue
+                        if len(_rcells) >= 5 and _is_green_fill(_rcells[3]) and _is_green_fill(_rcells[4]):
+                            if _n_ci is not None and _n_ci < len(_rcells):
+                                _nv = str(_rcells[_n_ci].value or "").strip()
+                                if _nv and _nv.lower() not in ("nan", "none", ""):
+                                    green_n_set.add(_nv)
             finally:
                 _wb.close()
                 del _wb
@@ -364,9 +384,7 @@ def load_excel(path: str) -> tuple[list[dict], str]:
         return s.lstrip("0") if s.lstrip("0") else s
 
     rows: list[dict] = []
-    for _row_i, (_, r) in enumerate(df.iterrows()):
-        # Fila Excel 1-based: hdr filas de cabecera + 1 fila de cabecera DESTINO + 1 offset + _row_i
-        _excel_row_1idx = hdr + 2 + _row_i
+    for _, r in df.iterrows():
         destino = _safe_str(r.get("DESTINO", ""))
         n = _safe_str(r.get("Nº", r.get("N°", "")))
         agencia = _safe_str(r.get("AGENCIA CONTRATADA", ""))
@@ -466,7 +484,7 @@ def load_excel(path: str) -> tuple[list[dict], str]:
             "cod_centro": cod_centro,
             "precinto": precinto,
             "precintos_data": precintos_data,
-            "ya_cargado": (_excel_row_1idx in green_rows),
+            "ya_cargado": bool(n and n in green_n_set),
             "estado": "ready" if destino else "missing-cif",
         })
 
@@ -567,7 +585,7 @@ def odbc_lookup_client(cod_cli: str) -> tuple[str, str]:
         cur = conn.cursor()
         cur.execute(
             f"SELECT NIFCLI, NOMCLI FROM {TABLE_GECLI2} WHERE CODCLI = ? FETCH FIRST 1 ROWS ONLY",
-            int(key),
+            key,
         )
         row = cur.fetchone()
         if row:
@@ -621,7 +639,7 @@ def odbc_lookup_touliv1(cod_cli: str) -> "int | None":
         cur = conn.cursor()
         cur.execute(
             f"SELECT TOULIV1 FROM {TABLE_GECLI2} WHERE CODCLI = ? AND CODACT = 101 FETCH FIRST 1 ROWS ONLY",
-            int(key),
+            key,
         )
         row = cur.fetchone()
         if row and row[0] is not None:

@@ -301,13 +301,18 @@ class QueueManager:
 
     @staticmethod
     def _minutes_to_departure(hora_salida: str) -> float:
-        """Minutos hasta la hora de salida desde ahora. Inf si no hay hora válida."""
+        """Minutos hasta la hora de salida desde ahora. Inf si no hay hora válida.
+        Si la hora ya pasó (más de 5 min), se asume que es del día siguiente."""
         try:
             parts = str(hora_salida).strip().split(":")
             h, m = int(parts[0]), int(parts[1])
             now = datetime.now()
             dep = now.replace(hour=h, minute=m, second=0, microsecond=0)
-            return (dep - now).total_seconds() / 60
+            diff = (dep - now).total_seconds() / 60
+            if diff < -5:
+                dep = dep.replace(day=dep.day + 1)
+                diff = (dep - now).total_seconds() / 60
+            return diff
         except Exception:
             return float("inf")
 
@@ -412,6 +417,17 @@ class QueueManager:
                     self._save()
                     return {"ok": True}
             return {"ok": False, "error": "No encontrado o no en pending_merch"}
+
+    def send_to_pending_merch(self, item_id: str) -> dict:
+        """Mueve un item de la cola (queued) a Sin mercancía (pending_merch)."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id and it["status"] in ("queued",):
+                    it["status"] = "pending_merch"
+                    it["mercancia_ok"] = False
+                    self._save()
+                    return {"ok": True}
+            return {"ok": False, "error": "No encontrado o no está en cola"}
 
     def update_ruta_carga(self, item_id: str, ruta_carga: int, numsup_count: int, mercancia_ok: bool) -> dict:
         """Actualiza ruta_carga y numsup_count de un item (corrección manual de ruta)."""

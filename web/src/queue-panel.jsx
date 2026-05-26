@@ -52,6 +52,12 @@ const QueuePanel = ({ pushToast }) => {
     else pushToast(r.error || "Error", "error");
   };
 
+  const handleSendToPendingMerch = async (id) => {
+    const r = await window.api.call("queue_send_to_pending_merch", id);
+    if (r.ok) { pushToast("Movido a Sin mercancía", "info"); refresh(); setActiveTab("sinmerch"); }
+    else pushToast(r.error || "Error", "error");
+  };
+
   const handleOpenOdbc = async () => {
     const r = await window.api.call("get_odbc_diagnostics");
     if (r.ok) setOdbcLog(r.log || []);
@@ -208,6 +214,7 @@ const QueuePanel = ({ pushToast }) => {
                   onReassign={(loaderId) => handleReassign(it.id, loaderId)}
                   showReassignMenu={reassignFor === it.id}
                   onOpenReassign={() => setReassignFor(reassignFor === it.id ? null : it.id)}
+                  onSendToPendingMerch={() => handleSendToPendingMerch(it.id)}
                 />
               ))}
             </div>
@@ -291,7 +298,10 @@ const QueuePanel = ({ pushToast }) => {
               const now = new Date();
               const dep = new Date(now);
               dep.setHours(h, m, 0, 0);
-              return (dep - now) / 60000 <= 45;
+              // Si la hora ya pasó más de 5 min → es del día siguiente
+              if ((dep - now) < -5 * 60000) dep.setDate(dep.getDate() + 1);
+              const diffMin = (dep - now) / 60000;
+              return diffMin >= 0 && diffMin <= 45;
             });
             return (
               <div key={group[0].viaje_n || group[0].id} style={{
@@ -431,7 +441,7 @@ const ComboBadge = () => (
   </span>
 );
 
-const QueueCard = ({ item, position, loaders, onToggleUrgent, onRemove, onReassign, showReassignMenu, onOpenReassign }) => (
+const QueueCard = ({ item, position, loaders, onToggleUrgent, onRemove, onReassign, showReassignMenu, onOpenReassign, onSendToPendingMerch }) => (
   <div style={{
     ...QS.card,
     borderLeft: item.urgente ? "3px solid #dc2626" : "3px solid transparent",
@@ -450,6 +460,10 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onRemove, onReassi
         <button onClick={onOpenReassign} title="Asignar manualmente"
           style={{ ...QS.iconBtn, color: showReassignMenu ? "#1c1917" : "#a8a29e" }}>
           <IconTruck size={12} />
+        </button>
+        <button onClick={onSendToPendingMerch} title="Mover a Sin mercancía"
+          style={{ ...QS.iconBtn, color: "#d97706", fontSize: 11, fontWeight: 700 }}>
+          →⚠
         </button>
         <button onClick={onRemove} title="Quitar de cola"
           style={{ ...QS.iconBtn, color: "#a8a29e" }}>

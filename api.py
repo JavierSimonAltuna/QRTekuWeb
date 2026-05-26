@@ -334,6 +334,13 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def queue_send_to_pending_merch(self, item_id: str) -> dict:
+        """Mueve un item de la cola a Sin mercancía."""
+        try:
+            return queue_manager.get_manager().send_to_pending_merch(item_id)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def queue_update_ruta(self, item_id: str, ruta_carga: str) -> dict:
         """Recalcula numsup con una ruta manual y actualiza el item de la cola."""
         try:
