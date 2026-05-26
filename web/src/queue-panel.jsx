@@ -5,8 +5,12 @@
 const { useState, useEffect, useCallback } = React;
 
 const QueuePanel = ({ pushToast }) => {
-  const [snap, setSnap] = useState({ queued: [], assigned: [], done: [], loaders: [], counts: { queued: 0, assigned: 0, done: 0 } });
-  const [reassignFor, setReassignFor] = useState(null); // item id
+  const [snap, setSnap] = useState({
+    queued: [], assigned: [], done: [], pending_merch: [], loaders: [],
+    counts: { queued: 0, assigned: 0, done: 0, pending_merch: 0 }
+  });
+  const [activeTab, setActiveTab] = useState("cola");
+  const [reassignFor, setReassignFor] = useState(null);
   const [search, setSearch] = useState("");
 
   const refresh = useCallback(async () => {
@@ -18,7 +22,7 @@ const QueuePanel = ({ pushToast }) => {
 
   useEffect(() => {
     refresh();
-    const t = setInterval(refresh, 6000);
+    const t = setInterval(refresh, 5000);
     return () => clearInterval(t);
   }, [refresh]);
 
@@ -38,6 +42,20 @@ const QueuePanel = ({ pushToast }) => {
     const r = await window.api.call("queue_reassign", id, loaderId);
     if (r.ok) { pushToast("Reasignada", "success"); refresh(); setReassignFor(null); }
     else pushToast(r.error || "Error", "error");
+  };
+
+  const handleForceQueued = async (id) => {
+    const r = await window.api.call("queue_force_queued", id);
+    if (r.ok) { pushToast("Priorizada a la cola", "success"); refresh(); setActiveTab("cola"); }
+    else pushToast(r.error || "Error", "error");
+  };
+
+  const handleRefreshNumsup = async (item_id, ruta_carga) => {
+    const r = await window.api.call("queue_update_ruta", item_id, String(ruta_carga));
+    if (r.ok) {
+      pushToast(`Ruta ${ruta_carga}: ${r.numsup_count} pales supervisados`, r.numsup_count > 25 ? "success" : "info");
+      refresh();
+    } else pushToast(r.error || "Error al consultar ruta", "error");
   };
 
   const handleResetDone = async () => {
@@ -68,20 +86,35 @@ const QueuePanel = ({ pushToast }) => {
   };
 
   const loaderById = (id) => snap.loaders.find((l) => l.id === id);
+  const pendingMerch = snap.pending_merch || [];
+
+  // Agrupar pending_merch por viaje_n para mostrar combinados juntos
+  const pendingGroups = (() => {
+    const map = {};
+    for (const it of pendingMerch) {
+      const k = it.viaje_n || it.id;
+      if (!map[k]) map[k] = [];
+      map[k].push(it);
+    }
+    return Object.values(map);
+  })();
 
   return (
     <div style={QS.root}>
-      {/* ─── Header stats ─── */}
+      {/* ─── Header stats + tabs ─── */}
       <div style={QS.stats}>
         <StatBig label="En cola"     value={snap.counts.queued}   color="#1c1917" />
         <StatBig label="Asignadas"   value={snap.counts.assigned} color="#0ea5e9" />
         <StatBig label="Completadas" value={snap.counts.done}     color="#15803d" />
+        {(snap.counts.pending_merch || 0) > 0 && (
+          <StatBig label="Sin mercancía" value={snap.counts.pending_merch} color="#d97706" />
+        )}
         <div style={{ flex: 1 }} />
         <button onClick={refresh} style={QS.refreshBtn} title="Refrescar">
           <IconRefresh size={14} />
           Refrescar
         </button>
-        {snap.counts.queued > 0 && (
+        {(snap.counts.queued + (snap.counts.pending_merch || 0)) > 0 && (
           <button onClick={handleResetQueued} style={QS.clearBtn} title="Vaciar cola de pendientes">
             <IconTrash size={13} />
             Vaciar cola
@@ -95,111 +128,206 @@ const QueuePanel = ({ pushToast }) => {
         )}
       </div>
 
-      {/* ─── Buscador ─── */}
-      <div style={QS.searchBar}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-        </svg>
-        <input
-          type="text"
-          placeholder="Buscar por destino, matrícula, muelle, cliente…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={QS.searchInput}
-        />
-        {search && (
-          <button onClick={() => setSearch("")} style={QS.searchClear}>✕</button>
-        )}
+      {/* ─── Tabs ─── */}
+      <div style={QS.tabBar}>
+        <button
+          onClick={() => setActiveTab("cola")}
+          style={{ ...QS.tab, ...(activeTab === "cola" ? QS.tabActive : {}) }}
+        >
+          Cola de cargas
+          {snap.counts.queued > 0 && (
+            <span style={QS.tabBadge}>{snap.counts.queued}</span>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab("sinmerch")}
+          style={{ ...QS.tab, ...(activeTab === "sinmerch" ? QS.tabActive : {}), ...(pendingGroups.length > 0 ? { color: "#d97706" } : {}) }}
+        >
+          ⚠ Sin mercancía
+          {pendingGroups.length > 0 && (
+            <span style={{ ...QS.tabBadge, background: "#fef3c7", color: "#d97706" }}>
+              {pendingMerch.length}
+            </span>
+          )}
+        </button>
       </div>
 
-      {/* ─── Grid 3 columnas ─── */}
-      <div style={QS.grid}>
-        {/* ── Cola ── */}
-        <section style={QS.col}>
-          <div style={QS.colHead}>
-            <span style={QS.colTitle}>Cola</span>
-            <span style={QS.colCount}>{snap.queued.length}</span>
-          </div>
-          <div style={QS.list}>
-            {snap.queued.filter(matchesSearch).length === 0 ? (
-              <EmptyMini
-                label={search ? "Sin resultados" : "Sin cargas en cola"}
-                hint={search ? `No coincide ningún elemento con "${search}"` : "Se añaden automáticamente cuando se detecta la hora de acule"}
-              />
-            ) : snap.queued.filter(matchesSearch).map((it, i) => (
-              <QueueCard
-                key={it.id}
-                item={it}
-                position={i + 1}
-                loaders={snap.loaders}
-                onToggleUrgent={() => handleUrgent(it.id, it.urgente)}
-                onRemove={() => handleRemove(it.id)}
-                onReassign={(loaderId) => handleReassign(it.id, loaderId)}
-                showReassignMenu={reassignFor === it.id}
-                onOpenReassign={() => setReassignFor(reassignFor === it.id ? null : it.id)}
-              />
-            ))}
-          </div>
-        </section>
+      {/* ─── Buscador (solo en cola) ─── */}
+      {activeTab === "cola" && (
+        <div style={QS.searchBar}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input
+            type="text"
+            placeholder="Buscar por destino, matrícula, muelle, cliente…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={QS.searchInput}
+          />
+          {search && (
+            <button onClick={() => setSearch("")} style={QS.searchClear}>✕</button>
+          )}
+        </div>
+      )}
 
-        {/* ── Asignadas ── */}
-        <section style={QS.col}>
-          <div style={QS.colHead}>
-            <span style={QS.colTitle}>En curso</span>
-            <span style={QS.colCount}>{snap.assigned.length}</span>
-          </div>
-          <div style={QS.list}>
-            {snap.assigned.filter(matchesSearch).length === 0 ? (
-              <EmptyMini
-                label={search ? "Sin resultados" : "Ninguna carga en curso"}
-                hint={search ? `No coincide ningún elemento con "${search}"` : "Cuando un cargador pida una carga aparecerá aquí"}
-              />
-            ) : snap.assigned.filter(matchesSearch).map((it) => (
-              <AssignedCard
-                key={it.id}
-                item={it}
-                loader={loaderById(it.assigned_to)}
-                loaders={snap.loaders}
-                onReassign={(loaderId) => handleReassign(it.id, loaderId)}
-                onRemove={() => handleRemove(it.id)}
-                showReassignMenu={reassignFor === it.id}
-                onOpenReassign={() => setReassignFor(reassignFor === it.id ? null : it.id)}
-              />
-            ))}
-          </div>
-        </section>
+      {/* ─── Tab: Cola de cargas ─── */}
+      {activeTab === "cola" && (
+        <div style={QS.grid}>
+          {/* ── Cola ── */}
+          <section style={QS.col}>
+            <div style={QS.colHead}>
+              <span style={QS.colTitle}>Cola</span>
+              <span style={QS.colCount}>{snap.queued.length}</span>
+            </div>
+            <div style={QS.list}>
+              {snap.queued.filter(matchesSearch).length === 0 ? (
+                <EmptyMini
+                  label={search ? "Sin resultados" : "Sin cargas en cola"}
+                  hint={search ? `No coincide ningún elemento con "${search}"` : "Se añaden automáticamente cuando se detecta la hora de acule"}
+                />
+              ) : snap.queued.filter(matchesSearch).map((it, i) => (
+                <QueueCard
+                  key={it.id}
+                  item={it}
+                  position={i + 1}
+                  loaders={snap.loaders}
+                  onToggleUrgent={() => handleUrgent(it.id, it.urgente)}
+                  onRemove={() => handleRemove(it.id)}
+                  onReassign={(loaderId) => handleReassign(it.id, loaderId)}
+                  showReassignMenu={reassignFor === it.id}
+                  onOpenReassign={() => setReassignFor(reassignFor === it.id ? null : it.id)}
+                />
+              ))}
+            </div>
+          </section>
 
-        {/* ── Cargadores ── */}
-        <section style={QS.col}>
-          <div style={QS.colHead}>
-            <span style={QS.colTitle}>Cargadores</span>
-            <span style={QS.colCount}>{snap.loaders.filter((l) => l.active).length}</span>
-          </div>
-          <div style={QS.list}>
-            {snap.loaders.map((l) => {
-              const current = snap.assigned.find((a) => a.assigned_to === l.id);
-              return (
-                <LoaderCard key={l.id} loader={l} current={current} />
-              );
-            })}
-          </div>
+          {/* ── Asignadas ── */}
+          <section style={QS.col}>
+            <div style={QS.colHead}>
+              <span style={QS.colTitle}>En curso</span>
+              <span style={QS.colCount}>{snap.assigned.length}</span>
+            </div>
+            <div style={QS.list}>
+              {snap.assigned.filter(matchesSearch).length === 0 ? (
+                <EmptyMini
+                  label={search ? "Sin resultados" : "Ninguna carga en curso"}
+                  hint={search ? `No coincide ningún elemento con "${search}"` : "Cuando un cargador pida una carga aparecerá aquí"}
+                />
+              ) : snap.assigned.filter(matchesSearch).map((it) => (
+                <AssignedCard
+                  key={it.id}
+                  item={it}
+                  loader={loaderById(it.assigned_to)}
+                  loaders={snap.loaders}
+                  onReassign={(loaderId) => handleReassign(it.id, loaderId)}
+                  onRemove={() => handleRemove(it.id)}
+                  showReassignMenu={reassignFor === it.id}
+                  onOpenReassign={() => setReassignFor(reassignFor === it.id ? null : it.id)}
+                />
+              ))}
+            </div>
+          </section>
 
-          {/* ── Histórico breve ── */}
-          {snap.done.length > 0 && (
-            <>
-              <div style={{ ...QS.colHead, marginTop: 18 }}>
-                <span style={QS.colTitle}>Últimas completadas</span>
-                <span style={QS.colCount}>{snap.done.length}</span>
-              </div>
-              <div style={QS.list}>
-                {[...snap.done].reverse().slice(0, 10).map((it) => (
-                  <DoneCard key={it.id} item={it} loader={loaderById(it.assigned_to)} />
+          {/* ── Cargadores ── */}
+          <section style={QS.col}>
+            <div style={QS.colHead}>
+              <span style={QS.colTitle}>Cargadores</span>
+              <span style={QS.colCount}>{snap.loaders.filter((l) => l.active).length}</span>
+            </div>
+            <div style={QS.list}>
+              {snap.loaders.map((l) => {
+                const current = snap.assigned.find((a) => a.assigned_to === l.id);
+                return (
+                  <LoaderCard key={l.id} loader={l} current={current} />
+                );
+              })}
+            </div>
+
+            {/* ── Histórico breve ── */}
+            {snap.done.length > 0 && (
+              <>
+                <div style={{ ...QS.colHead, marginTop: 18 }}>
+                  <span style={QS.colTitle}>Últimas completadas</span>
+                  <span style={QS.colCount}>{snap.done.length}</span>
+                </div>
+                <div style={QS.list}>
+                  {[...snap.done].reverse().slice(0, 10).map((it) => (
+                    <DoneCard key={it.id} item={it} loader={loaderById(it.assigned_to)} />
+                  ))}
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+      )}
+
+      {/* ─── Tab: Sin mercancía suficiente ─── */}
+      {activeTab === "sinmerch" && (
+        <div style={QS.sinMerchRoot}>
+          {pendingGroups.length === 0 ? (
+            <EmptyMini
+              label="Sin camiones en espera de mercancía"
+              hint="Todos los camiones aculados tienen suficiente mercancía supervisada (>25 pales)"
+            />
+          ) : pendingGroups.map((group) => {
+            const isCombo = group.length > 1 || group[0].is_combined;
+            const combinedCount = group[0].combined_count ?? group.reduce((s, it) => s + (it.numsup_count || 0), 0);
+            const nearDep = group.some((it) => {
+              const hs = it.hora_salida || "";
+              if (!hs.includes(":")) return false;
+              const [h, m] = hs.split(":").map(Number);
+              const now = new Date();
+              const dep = new Date(now);
+              dep.setHours(h, m, 0, 0);
+              return (dep - now) / 60000 <= 45;
+            });
+            return (
+              <div key={group[0].viaje_n || group[0].id} style={{
+                ...QS.pendGroup,
+                borderLeft: nearDep ? "3px solid #d97706" : "3px solid #e7e5e4",
+              }}>
+                {/* Cabecera del grupo */}
+                <div style={QS.pendGroupHead}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {isCombo && (
+                      <span style={QS.comboBadge}>COMBINADO</span>
+                    )}
+                    <span style={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#57534e" }}>
+                      Nº {group[0].viaje_n}
+                    </span>
+                    {nearDep && (
+                      <span style={QS.urgentBadge}>⚡ &lt;45 min</span>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={QS.pendCount}>
+                      {combinedCount} / 25 pales
+                    </span>
+                    <button
+                      onClick={() => { if (confirm("¿Priorizar este viaje a la cola aunque falte mercancía?")) handleForceQueued(group[0].id); }}
+                      style={QS.prioritizeBtn}
+                      title="Forzar entrada a cola como urgente"
+                    >
+                      ↑ Priorizar
+                    </button>
+                  </div>
+                </div>
+
+                {/* Tarjetas de cada centro */}
+                {group.map((it) => (
+                  <PendingMerchCard
+                    key={it.id}
+                    item={it}
+                    onRemove={() => handleRemove(it.id)}
+                    onRefreshNumsup={(ruta) => handleRefreshNumsup(it.id, ruta)}
+                  />
                 ))}
               </div>
-            </>
-          )}
-        </section>
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };
@@ -207,6 +335,19 @@ const QueuePanel = ({ pushToast }) => {
 // ───────────────────────────────────────────────────────────────
 // Tarjetas
 // ───────────────────────────────────────────────────────────────
+
+// Badge de viaje combinado para la vista de cola y cargador
+const ComboBadge = () => (
+  <span style={{
+    fontSize: 9, fontWeight: 700, letterSpacing: 0.8,
+    background: "#ede9fe", color: "#6d28d9",
+    padding: "2px 6px", borderRadius: 999, textTransform: "uppercase",
+    whiteSpace: "nowrap",
+  }}>
+    COMBINADO
+  </span>
+);
+
 const QueueCard = ({ item, position, loaders, onToggleUrgent, onRemove, onReassign, showReassignMenu, onOpenReassign }) => (
   <div style={{
     ...QS.card,
@@ -216,6 +357,7 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onRemove, onReassi
       <div style={QS.cardLeft}>
         <span style={QS.cardPos}>{String(position).padStart(2, "0")}</span>
         <span style={QS.cardTicket}>{item.id}</span>
+        {item.is_combined && <ComboBadge />}
       </div>
       <div style={QS.cardRight}>
         <button onClick={onToggleUrgent} title={item.urgente ? "Quitar urgencia" : "Marcar urgente"}
@@ -244,11 +386,23 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onRemove, onReassi
           {item.tipo_carga === "REFRIGERADO" ? "❄" : "☼"}
         </span>
       </div>
+      {/* Centros del viaje combinado */}
+      {item.is_combined && item.trip_destinos && item.trip_destinos.length > 1 && (
+        <div style={{ fontSize: 10, color: "#6d28d9", background: "#f5f3ff", borderRadius: 4, padding: "3px 7px", fontWeight: 600 }}>
+          {item.trip_destinos.join(" → ")}
+        </div>
+      )}
       <div style={QS.cardMeta}>
         <Meta label="Muelle" value={(item.muelle || "—").padStart(2, "0")} />
         <Meta label="Playa" value={item.playa || "—"} />
         <Meta label="Salida" value={item.hora_salida || "—"} />
         {item.cod_centro && <Meta label="Cliente" value={item.cod_centro} />}
+        {(item.combined_count != null || item.numsup_count != null) && (
+          <Meta
+            label="Pales"
+            value={`${item.combined_count ?? item.numsup_count} / 25`}
+          />
+        )}
       </div>
       <div style={QS.cardTractora}>{item.tractora}</div>
     </div>
@@ -275,6 +429,7 @@ const AssignedCard = ({ item, loader, loaders, onReassign, onRemove, showReassig
     <div style={QS.cardHead}>
       <div style={QS.cardLeft}>
         <span style={QS.cardTicket}>{item.id}</span>
+        {item.is_combined && <ComboBadge />}
         <span style={QS.assignedBy}>
           <IconTruck size={11} />
           {loader?.id || item.assigned_to} · {loader?.name || "?"}
@@ -291,6 +446,11 @@ const AssignedCard = ({ item, loader, loaders, onReassign, onRemove, showReassig
     </div>
     <div style={QS.cardBody}>
       <div style={QS.cardDestino}>{item.destino}</div>
+      {item.is_combined && item.trip_destinos && item.trip_destinos.length > 1 && (
+        <div style={{ fontSize: 10, color: "#6d28d9", background: "#f5f3ff", borderRadius: 4, padding: "3px 7px", fontWeight: 600 }}>
+          {item.trip_destinos.join(" → ")}
+        </div>
+      )}
       <div style={QS.cardMeta}>
         <Meta label="Muelle" value={(item.muelle || "—").padStart(2, "0")} />
         <Meta label="Asignada" value={fmtT(item.assigned_at)} />
@@ -313,6 +473,73 @@ const AssignedCard = ({ item, loader, loaders, onReassign, onRemove, showReassig
   </div>
 );
 
+const PendingMerchCard = ({ item, onRemove, onRefreshNumsup }) => {
+  const [editRuta, setEditRuta] = useState(false);
+  const [rutaVal, setRutaVal] = useState(String(item.ruta_carga ?? ""));
+  const pales = item.numsup_count ?? "?";
+  const palesColor = typeof pales === "number" ? (pales >= 25 ? "#15803d" : pales >= 15 ? "#d97706" : "#dc2626") : "#a8a29e";
+  return (
+    <div style={QS.pendCard}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#1c1917" }}>{item.destino}</div>
+          <div style={{ fontSize: 11, color: "#78716c", marginTop: 3 }}>
+            {item.tractora && <span style={{ fontFamily: "ui-monospace, monospace", marginRight: 8 }}>{item.tractora}</span>}
+            Muelle {(item.muelle || "—").padStart(2, "0")}
+            {item.hora_salida && <span> · Salida {item.hora_salida}</span>}
+          </div>
+          {/* Ruta + pales con edición inline */}
+          {!editRuta ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5 }}>
+              {item.ruta_carga != null
+                ? <span style={{ fontSize: 10.5, color: "#78716c" }}>RUTA <b>{item.ruta_carga}</b></span>
+                : <span style={{ fontSize: 10.5, color: "#dc2626" }}>Sin ruta detectada</span>
+              }
+              <span style={{ fontSize: 12, fontWeight: 700, color: palesColor }}>
+                {pales} pales
+              </span>
+              <button
+                onClick={() => setEditRuta(true)}
+                style={{ fontSize: 10, color: "#0ea5e9", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                title="Editar ruta manualmente"
+              >
+                ✎ editar
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 5, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 10.5, color: "#78716c" }}>RUTA:</span>
+              <input
+                type="number"
+                value={rutaVal}
+                onChange={(e) => setRutaVal(e.target.value)}
+                style={{ fontSize: 12, padding: "2px 6px", border: "1px solid #d6d3d1", borderRadius: 4, width: 70 }}
+                placeholder="Nº ruta"
+                autoFocus
+              />
+              <button
+                onClick={() => { if (rutaVal) onRefreshNumsup(rutaVal); setEditRuta(false); }}
+                style={{ fontSize: 11, padding: "3px 9px", background: "#0ea5e9", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}
+              >
+                Buscar
+              </button>
+              <button
+                onClick={() => setEditRuta(false)}
+                style={{ fontSize: 11, padding: "3px 7px", background: "transparent", border: "1px solid #d6d3d1", borderRadius: 4, cursor: "pointer", color: "#78716c" }}
+              >
+                ✕
+              </button>
+            </div>
+          )}
+        </div>
+        <button onClick={onRemove} style={{ ...QS.iconBtn, color: "#a8a29e", marginTop: -2, flexShrink: 0 }}>
+          <IconX size={13} />
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const LoaderCard = ({ loader, current }) => (
   <div style={QS.loaderCard}>
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -333,7 +560,8 @@ const LoaderCard = ({ loader, current }) => (
     </div>
     {current ? (
       <div style={QS.loaderCurrent}>
-        Cargando #{current.id} · {current.destino}
+        {current.is_combined && <span style={{ color: "#6d28d9", marginRight: 6 }}>COMBO</span>}
+        #{current.id} · {current.destino}
       </div>
     ) : (
       <div style={{ fontSize: 10.5, color: "#a8a29e", marginTop: 8, fontStyle: "italic" }}>En espera</div>
@@ -393,6 +621,12 @@ const QS = {
   stats: { display: "flex", alignItems: "center", padding: "14px 24px", background: "#fff", borderBottom: "1px solid #e7e5e4", flexShrink: 0 },
   refreshBtn: { display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: "#fafaf9", border: "1px solid #e7e5e4", borderRadius: 8, fontSize: 12, color: "#57534e", cursor: "pointer", fontFamily: "inherit", marginRight: 6 },
   clearBtn: { display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: "#fff", border: "1px solid #fecaca", borderRadius: 8, fontSize: 12, color: "#dc2626", cursor: "pointer", fontFamily: "inherit" },
+
+  tabBar: { display: "flex", background: "#fff", borderBottom: "1px solid #e7e5e4", flexShrink: 0, padding: "0 16px", gap: 4 },
+  tab: { padding: "10px 16px", fontSize: 12.5, fontWeight: 600, color: "#78716c", background: "transparent", border: "none", borderBottom: "2px solid transparent", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6, marginBottom: -1 },
+  tabActive: { color: "#1c1917", borderBottomColor: "#1c1917" },
+  tabBadge: { fontSize: 10, fontWeight: 700, padding: "1px 7px", borderRadius: 999, background: "#f4f4f3", color: "#57534e" },
+
   searchBar: { display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", background: "#fff", borderBottom: "1px solid #e7e5e4", flexShrink: 0 },
   searchInput: { flex: 1, padding: "6px 10px", border: "1px solid #e7e5e4", borderRadius: 8, fontSize: 12.5, fontFamily: "inherit", outline: "none", color: "#1c1917", background: "#fafaf9" },
   searchClear: { background: "transparent", border: "none", color: "#a8a29e", cursor: "pointer", fontSize: 13, padding: "2px 6px", lineHeight: 1 },
@@ -406,7 +640,7 @@ const QS = {
 
   card: { background: "#fff", border: "1px solid #e7e5e4", borderRadius: 8, padding: 12, position: "relative", transition: "all 160ms" },
   cardHead: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-  cardLeft: { display: "flex", alignItems: "center", gap: 8, minWidth: 0 },
+  cardLeft: { display: "flex", alignItems: "center", gap: 8, minWidth: 0, flexWrap: "wrap" },
   cardPos: { fontSize: 11, fontWeight: 700, color: "#a8a29e", fontFamily: "ui-monospace, monospace" },
   cardTicket: { fontSize: 11, fontWeight: 600, color: "#1c1917", fontFamily: "ui-monospace, monospace", letterSpacing: 0.5 },
   cardRight: { display: "flex", gap: 4 },
@@ -433,6 +667,16 @@ const QS = {
   loaderCurrent: { fontSize: 11, color: "#0c4a6e", background: "#dbeafe", padding: "5px 8px", borderRadius: 4, marginTop: 8, fontWeight: 600, fontFamily: "ui-monospace, monospace", letterSpacing: 0.2 },
 
   doneCard: { background: "#fff", border: "1px solid #e7e5e4", borderRadius: 6, padding: "8px 12px" },
+
+  // Sin mercancía tab
+  sinMerchRoot: { flex: 1, overflowY: "auto", padding: "16px", display: "flex", flexDirection: "column", gap: 12 },
+  pendGroup: { background: "#fff", border: "1px solid #e7e5e4", borderRadius: 8, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 },
+  pendGroupHead: { display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 8, borderBottom: "1px solid #f4f4f3" },
+  pendCard: { background: "#fafaf9", border: "1px solid #f4f4f3", borderRadius: 6, padding: "10px 12px" },
+  pendCount: { fontSize: 11, fontWeight: 700, color: "#d97706", background: "#fef3c7", padding: "2px 8px", borderRadius: 999 },
+  prioritizeBtn: { fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 6, background: "#fff7ed", border: "1px solid #fed7aa", color: "#c2410c", cursor: "pointer", fontFamily: "inherit" },
+  comboBadge: { fontSize: 9, fontWeight: 700, letterSpacing: 0.8, background: "#ede9fe", color: "#6d28d9", padding: "2px 7px", borderRadius: 999, textTransform: "uppercase" },
+  urgentBadge: { fontSize: 10, fontWeight: 700, color: "#d97706", background: "#fef3c7", padding: "2px 8px", borderRadius: 999 },
 };
 
 window.QueuePanel = QueuePanel;

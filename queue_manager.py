@@ -413,6 +413,20 @@ class QueueManager:
                     return {"ok": True}
             return {"ok": False, "error": "No encontrado o no en pending_merch"}
 
+    def update_ruta_carga(self, item_id: str, ruta_carga: int, numsup_count: int, mercancia_ok: bool) -> dict:
+        """Actualiza ruta_carga y numsup_count de un item (corrección manual de ruta)."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id:
+                    it["ruta_carga"] = ruta_carga
+                    it["numsup_count"] = numsup_count
+                    it["mercancia_ok"] = mercancia_ok
+                    if it["status"] == "pending_merch" and mercancia_ok:
+                        it["status"] = "queued"
+                    self._save()
+                    return {"ok": True, "item": it, "numsup_count": numsup_count}
+            return {"ok": False, "error": "No encontrado"}
+
     # ────────────────────────────────────────────────────────────
     # Lecturas
     # ────────────────────────────────────────────────────────────

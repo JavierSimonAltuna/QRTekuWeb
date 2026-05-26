@@ -58,6 +58,7 @@ SAVE_DIR = _resolve_save_dir()
 # Caché ODBC en memoria + tabla CHF Excel (fallback)
 _odbc_cache: dict[str, tuple[str, str]] = {}
 _client_cache: dict[str, tuple[str, str]] = {}
+_touliv1_cache: dict[str, "int | None"] = {}
 _df_chf_cache: pd.DataFrame | None = None
 
 
@@ -555,6 +556,39 @@ def odbc_lookup_client(cod_cli: str) -> tuple[str, str]:
         pass
     _client_cache[key] = (cif, agencia)
     return cif, agencia
+
+
+def odbc_lookup_touliv1(cod_cli: str) -> "int | None":
+    """
+    Busca TOULIV1 en FGE50STO.GECLI2 por CODCLI.
+    Devuelve el int o None si no se encuentra. Cachea resultados.
+    """
+    key = str(cod_cli).strip().zfill(8)
+    if not key or key == "00000000":
+        return None
+    if key in _touliv1_cache:
+        return _touliv1_cache[key]
+    result = None
+    try:
+        import pyodbc
+        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=5)
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT TOULIV1 FROM {TABLE_GECLI2} WHERE CODCLI = ? FETCH FIRST 1 ROWS ONLY",
+            key,
+        )
+        row = cur.fetchone()
+        if row and row[0] is not None:
+            try:
+                result = int(row[0])
+            except (ValueError, TypeError):
+                result = None
+        cur.close()
+        conn.close()
+    except Exception:
+        pass
+    _touliv1_cache[key] = result
+    return result
 
 
 def odbc_count_gesupe6(ruta_carga: int) -> int:

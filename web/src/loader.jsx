@@ -279,6 +279,16 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize }) => {
             <span style={LS.muelleLabel}>MUELLE</span>
             <span style={LS.muellePill}>P-{item.playa ? Math.ceil((parseInt(item.playa, 10) || 0) / 100) || 1 : 1}</span>
           </div>
+          {/* Viaje combinado: mostrar todos los centros */}
+          {item.is_combined && item.trip_destinos && item.trip_destinos.length > 1 && (
+            <div style={{
+              fontSize: 10.5, fontWeight: 700, color: "#6d28d9",
+              background: "#f5f3ff", borderRadius: 6, padding: "6px 10px",
+              letterSpacing: 0.5, marginBottom: 6,
+            }}>
+              VIAJE COMBINADO: {item.trip_destinos.join(" → ")}
+            </div>
+          )}
           <div style={LS.muelleRow}>
             <div style={LS.muelleNum}>{(item.muelle || "—").padStart(2, "0")}</div>
             <div style={LS.muelleMeta}>

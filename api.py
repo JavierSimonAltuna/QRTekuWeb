@@ -90,16 +90,24 @@ class Api:
                                     r["agencia"] = agencia or r.get("agencia", "")
                                 except Exception:
                                     pass
-                        # GESUPE6: contar pales supervisados en tiempo real
+                        # GESUPE6: buscar TOULIV1 en GECLI2 por CODCLI → contar pales
                         try:
                             cod_centro = r.get("cod_centro", "")
                             if cod_centro:
-                                touliv1 = int(float(cod_centro))
-                                ruta_carga = touliv1 - 5
-                                numsup = core.odbc_count_gesupe6(ruta_carga)
-                                r["numsup_count"] = numsup
-                                r["touliv1"] = touliv1
-                                r["ruta_carga"] = ruta_carga
+                                # Lookup correcto: CODCLI → TOULIV1 en GECLI2
+                                touliv1 = core.odbc_lookup_touliv1(cod_centro)
+                                if touliv1 is None:
+                                    # Fallback: intentar cod_centro como valor numérico directo
+                                    try:
+                                        touliv1 = int(float(cod_centro))
+                                    except (ValueError, TypeError):
+                                        touliv1 = None
+                                if touliv1 is not None:
+                                    ruta_carga = int(touliv1) - 5
+                                    numsup = core.odbc_count_gesupe6(ruta_carga)
+                                    r["numsup_count"] = numsup
+                                    r["touliv1"] = touliv1
+                                    r["ruta_carga"] = ruta_carga
                         except Exception:
                             r["numsup_count"] = 0
                     # Fecha para QR
@@ -322,6 +330,16 @@ class Api:
         """Fuerza un item pending_merch a la cola como urgente."""
         try:
             return queue_manager.get_manager().force_queued(item_id)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def queue_update_ruta(self, item_id: str, ruta_carga: str) -> dict:
+        """Recalcula numsup con una ruta manual y actualiza el item de la cola."""
+        try:
+            ruta = int(str(ruta_carga).strip())
+            numsup = core.odbc_count_gesupe6(ruta)
+            mercancia_ok = numsup > 25
+            return queue_manager.get_manager().update_ruta_carga(item_id, ruta, numsup, mercancia_ok)
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
