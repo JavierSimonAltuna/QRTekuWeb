@@ -75,6 +75,10 @@
 <script>
   // Captura errores tempranos para mostrarlos en pantalla
   window.addEventListener("error", function(e) {
+    // Solo mostrar errores de runtime JS (e.error definido).
+    // Los errores de carga de recursos (scripts CDN sin red) tienen e.error=null
+    // y e.message="" → producirían "[error] error" confuso; los ignoramos.
+    if (!e.error) return;
     var box = document.getElementById("__error");
     box.classList.add("visible");
     box.textContent = "[error] " + (e.message || e.type) +
