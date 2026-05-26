@@ -51,6 +51,8 @@ class Api:
                 allow_multiple=False,
                 file_types=("Excel files (*.xlsx;*.xls)", "CSV files (*.csv)", "All files (*.*)"),
             )
+            if result:
+                core.clear_touliv1_cache()
             return result[0] if result else ""
         finally:
             self._picker_open = False
@@ -71,7 +73,6 @@ class Api:
         try:
             rows, fecha_b2 = core.load_excel(path)
             self._last_excel_path = path
-            core.clear_touliv1_cache()
             # Enriquecer las filas aculadas con CIF/Agencia (mejor esfuerzo)
             # y empujarlas a la cola Bleecker automáticamente.
             added = 0

@@ -54,22 +54,26 @@ const QRTekuApp = () => {
   }, []);
 
   // ── Auto-refresh para detectar cambios en el Excel (HORA ACULE) ─────────
+  // Usa setTimeout recursivo para evitar solapamiento si reload tarda >5s.
   useEffect(() => {
     if (!connected || !tw.autoRefresh || !fileInfo) return;
-    const interval = setInterval(async () => {
+    let alive = true;
+    let tid = null;
+    const tick = async () => {
       try {
         const res = await window.pywebview.api.reload_excel();
-        if (res && res.ok) {
+        if (alive && res && res.ok) {
           setRows((prevRows) => {
-            // Mantener "done" local pero actualizar aculado y datos desde Excel
             const doneSet = new Set(prevRows.filter((r) => r.estado === "done").map((r) => r.n));
             return res.rows.map((r) => doneSet.has(r.n) ? { ...r, estado: "done" } : r);
           });
           if (res.auto_enqueued > 0) pushToast(`${res.auto_enqueued} carga(s) añadidas a la cola Bleecker`, "success");
         }
       } catch (e) { /* silencio */ }
-    }, 5000);
-    return () => clearInterval(interval);
+      if (alive) tid = setTimeout(tick, 5000);
+    };
+    tid = setTimeout(tick, 5000);
+    return () => { alive = false; clearTimeout(tid); };
   }, [connected, tw.autoRefresh, fileInfo]);
 
   // ── Polling contadores de cola (badge en la pestaña) ───────────────────
@@ -537,7 +541,7 @@ const QRTekuApp = () => {
         <TweakSection label="Vista">
           <TweakToggle label="Tabla compacta"   value={tw.denseTable}     onChange={(v) => setTweak("denseTable", v)} />
           <TweakToggle label="Mostrar JSON"     value={tw.showJsonPanel}  onChange={(v) => setTweak("showJsonPanel", v)} />
-          <TweakToggle label="Auto-recargar Excel (20s)" value={tw.autoRefresh}    onChange={(v) => setTweak("autoRefresh", v)} />
+          <TweakToggle label="Auto-recargar Excel (5s)"  value={tw.autoRefresh}    onChange={(v) => setTweak("autoRefresh", v)} />
         </TweakSection>
       </TweaksPanel>
     </div>
