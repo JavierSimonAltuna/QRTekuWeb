@@ -39,7 +39,7 @@ const LoaderApp = () => {
   useEffect(() => {
     if (!loader) return;
     pollCurrent();
-    const t = setInterval(pollCurrent, 5000);
+    const t = setInterval(pollCurrent, 3000);
     return () => clearInterval(t);
     // eslint-disable-next-line
   }, [loader]);

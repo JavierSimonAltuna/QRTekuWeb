@@ -30,7 +30,14 @@ ALLOWED_METHODS = {
     "queue_remove",
     "queue_reassign",
     "queue_set_urgent",
+    "queue_set_comment",
+    "queue_force_queued",
+    "queue_send_to_pending_merch",
     "queue_reset_done",
+    "queue_reset_queued",
+    "queue_update_ruta",
+    # Diagnóstico
+    "get_odbc_diagnostics",
     # Útiles desde móvil (lectura)
     "app_info",
 }

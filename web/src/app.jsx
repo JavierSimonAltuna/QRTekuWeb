@@ -46,11 +46,27 @@ const QRTekuApp = () => {
   }, []);
 
   // ── PyWebView detection ────────────────────────────────────────
+  // Polling fallback: pywebviewready puede disparar antes de que React monte,
+  // o la inyección del bridge tarda un instante. Reintentamos cada 400ms hasta 8s.
   useEffect(() => {
-    const check = () => setConnected(!!(window.pywebview && window.pywebview.api));
-    check();
-    window.addEventListener("pywebviewready", check);
-    return () => window.removeEventListener("pywebviewready", check);
+    const tryConnect = () => {
+      if (window.pywebview && window.pywebview.api) {
+        setConnected(true);
+        return true;
+      }
+      return false;
+    };
+    if (tryConnect()) return;
+    const onReady = () => tryConnect();
+    window.addEventListener("pywebviewready", onReady);
+    let attempts = 0;
+    const poll = setInterval(() => {
+      if (tryConnect() || ++attempts >= 20) clearInterval(poll);
+    }, 400);
+    return () => {
+      window.removeEventListener("pywebviewready", onReady);
+      clearInterval(poll);
+    };
   }, []);
 
   // ── Auto-refresh para detectar cambios en el Excel (HORA ACULE) ─────────
