@@ -25,7 +25,9 @@ import qrcode
 ODBC_DSN = "INFOLOG"
 ODBC_UID = "infolog"
 ODBC_PWD = "infolog"
-TABLE_NAME = "FGE50STO.GEZCAM"
+TABLE_NAME   = "FGE50STO.GEZCAM"
+TABLE_GECLI2  = "FGE50STO.GECLI2"
+TABLE_GESUPE6 = "FGE50STO.GESUPE6"
 
 TABLE_CHF_PATH = r"C:\Users\QrCarga\TABLA CHF.xlsx"
 
@@ -55,6 +57,7 @@ SAVE_DIR = _resolve_save_dir()
 
 # Caché ODBC en memoria + tabla CHF Excel (fallback)
 _odbc_cache: dict[str, tuple[str, str]] = {}
+_client_cache: dict[str, tuple[str, str]] = {}
 _df_chf_cache: pd.DataFrame | None = None
 
 
@@ -195,6 +198,29 @@ def _load_chf_table() -> pd.DataFrame:
 
 
 # ─── Excel ──────────────────────────────────────────────────────────────
+def _is_green_fill(cell) -> bool:
+    """Devuelve True si la celda tiene fondo verde sólido (Excel color fill)."""
+    try:
+        fill = cell.fill
+        if fill is None or fill.fill_type not in ("solid",):
+            return False
+        fg = fill.fgColor
+        if fg is None or fg.type != "rgb":
+            return False
+        rgb_str = str(fg.rgb)
+        if len(rgb_str) == 8:
+            r = int(rgb_str[2:4], 16); g = int(rgb_str[4:6], 16); b = int(rgb_str[6:8], 16)
+        elif len(rgb_str) == 6:
+            r = int(rgb_str[0:2], 16); g = int(rgb_str[2:4], 16); b = int(rgb_str[4:6], 16)
+        else:
+            return False
+        if r == 0 and g == 0 and b == 0:
+            return False
+        return g > 100 and g > r * 1.2 and g > b * 1.2
+    except Exception:
+        return False
+
+
 def load_excel(path: str) -> tuple[list[dict], str]:
     """
     Carga el Excel y devuelve (rows, fecha_b2).
@@ -214,6 +240,24 @@ def load_excel(path: str) -> tuple[list[dict], str]:
         # Fallback: intentar abrir el original directamente
         read_path = path
         tmp_path = None
+
+    # Detectar celdas verdes en columnas D y E (índices 3,4) — ANTES que pandas,
+    # y SOLO si tenemos una copia temporal (nunca sobre el original para evitar lock).
+    green_rows: set = set()
+    if not read_path.lower().endswith(".csv") and tmp_path is not None:
+        try:
+            import openpyxl as _opx
+            _wb = _opx.load_workbook(read_path, read_only=False, data_only=True)
+            try:
+                _ws = _wb.active
+                for _ri, _rcells in enumerate(_ws.iter_rows(), start=1):
+                    if len(_rcells) >= 5 and _is_green_fill(_rcells[3]) and _is_green_fill(_rcells[4]):
+                        green_rows.add(_ri)
+            finally:
+                _wb.close()
+                del _wb
+        except Exception:
+            pass
 
     try:
         if read_path.lower().endswith(".csv"):
@@ -295,7 +339,9 @@ def load_excel(path: str) -> tuple[list[dict], str]:
         return s.lstrip("0") if s.lstrip("0") else s
 
     rows: list[dict] = []
-    for _, r in df.iterrows():
+    for _row_i, (_, r) in enumerate(df.iterrows()):
+        # Fila Excel 1-based: hdr filas de cabecera + 1 fila de cabecera DESTINO + 1 offset + _row_i
+        _excel_row_1idx = hdr + 2 + _row_i
         destino = _safe_str(r.get("DESTINO", ""))
         n = _safe_str(r.get("Nº", r.get("N°", "")))
         agencia = _safe_str(r.get("AGENCIA CONTRATADA", ""))
@@ -395,6 +441,7 @@ def load_excel(path: str) -> tuple[list[dict], str]:
             "cod_centro": cod_centro,
             "precinto": precinto,
             "precintos_data": precintos_data,
+            "ya_cargado": (_excel_row_1idx in green_rows),
             "estado": "ready" if destino else "missing-cif",
         })
 
@@ -476,6 +523,59 @@ def odbc_lookup_chf(matricula: str) -> tuple[str, str]:
 
     _odbc_cache[tractora_norm] = (cif, agencia)
     return cif, agencia
+
+
+def odbc_lookup_client(cod_cli: str) -> tuple[str, str]:
+    """
+    Busca CIF + Agencia por CODCLI en FGE50STO.GECLI2.
+    cod_cli debe pasarse zero-padded a 8 chars.
+    Devuelve (CIF, Agencia). Cachea resultados en _client_cache.
+    """
+    key = str(cod_cli).strip().zfill(8)
+    if not key or key == "00000000":
+        return "", ""
+    if key in _client_cache:
+        return _client_cache[key]
+    cif, agencia = "", ""
+    try:
+        import pyodbc
+        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=5)
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT NIFCLI, NOMCLI FROM {TABLE_GECLI2} WHERE CODCLI = ? FETCH FIRST 1 ROWS ONLY",
+            key,
+        )
+        row = cur.fetchone()
+        if row:
+            cif = str(row[0] or "").strip()
+            agencia = str(row[1] or "").strip()
+        cur.close()
+        conn.close()
+    except Exception:
+        pass
+    _client_cache[key] = (cif, agencia)
+    return cif, agencia
+
+
+def odbc_count_gesupe6(ruta_carga: int) -> int:
+    """
+    Cuenta pales supervisados para una ruta: COUNT(*) en GESUPE6
+    WHERE TOULIV=ruta_carga AND ETASUP=30. Sin caché (tiempo real).
+    """
+    try:
+        import pyodbc
+        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=5)
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT COUNT(*) FROM {TABLE_GESUPE6} WHERE TOULIV = ? AND ETASUP = 30",
+            int(ruta_carga),
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return int(row[0]) if row else 0
+    except Exception:
+        return 0
 
 
 # ─── QR ─────────────────────────────────────────────────────────────────
