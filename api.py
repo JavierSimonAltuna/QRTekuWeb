@@ -32,6 +32,7 @@ class Api:
         self._last_payload: dict = {}
         self._last_destino: str = ""
         self._last_precintos: list = []
+        self._picker_open: bool = False
 
     def set_window(self, window):
         self._window = window
@@ -43,12 +44,16 @@ class Api:
         """Abre un diálogo nativo para escoger un Excel. Devuelve la ruta o ''."""
         if not self._window:
             return ""
-        result = self._window.create_file_dialog(
-            webview.OPEN_DIALOG,
-            allow_multiple=False,
-            file_types=("Excel files (*.xlsx;*.xls)", "CSV files (*.csv)", "All files (*.*)"),
-        )
-        return result[0] if result else ""
+        self._picker_open = True
+        try:
+            result = self._window.create_file_dialog(
+                webview.OPEN_DIALOG,
+                allow_multiple=False,
+                file_types=("Excel files (*.xlsx;*.xls)", "CSV files (*.csv)", "All files (*.*)"),
+            )
+            return result[0] if result else ""
+        finally:
+            self._picker_open = False
 
     def load_excel(self, path: str) -> dict:
         """
@@ -71,17 +76,56 @@ class Api:
             added = 0
             try:
                 for r in rows:
-                    if r.get("aculado") and not r.get("cif"):
-                        matricula = (r.get("matriculas") or "").split("/")[0].strip()
-                        if matricula:
-                            try:
-                                cif, agencia = core.odbc_lookup_chf(matricula)
-                                r["cif"] = cif or ""
-                                r["agencia"] = agencia or r.get("agencia", "")
-                            except Exception:
-                                pass
-                    # Añadimos fecha a todas para construir bien el QR
+                    # Ya cargado: ocultar de vista y excluir de cola
+                    if r.get("ya_cargado"):
+                        r["estado"] = "done"
+                    # Enriquecer aculados activos
+                    if r.get("aculado") and not r.get("ya_cargado"):
+                        if not r.get("cif"):
+                            matricula = (r.get("matriculas") or "").split("/")[0].strip()
+                            if matricula:
+                                try:
+                                    cif, agencia = core.odbc_lookup_chf(matricula)
+                                    r["cif"] = cif or ""
+                                    r["agencia"] = agencia or r.get("agencia", "")
+                                except Exception:
+                                    pass
+                        # GESUPE6: contar pales supervisados en tiempo real
+                        try:
+                            cod_centro = r.get("cod_centro", "")
+                            if cod_centro:
+                                touliv1 = int(float(cod_centro))
+                                ruta_carga = touliv1 - 5
+                                numsup = core.odbc_count_gesupe6(ruta_carga)
+                                r["numsup_count"] = numsup
+                                r["touliv1"] = touliv1
+                                r["ruta_carga"] = ruta_carga
+                        except Exception:
+                            r["numsup_count"] = 0
+                    # Fecha para QR
                     r["fecha"] = fecha_b2
+
+                # Viajes combinados: sumar numsup_count por viaje_n
+                from collections import defaultdict
+                viaje_counts: dict = defaultdict(int)
+                viaje_rows: dict = defaultdict(list)
+                for r in rows:
+                    if r.get("aculado") and not r.get("ya_cargado"):
+                        n = r.get("n", "")
+                        if n:
+                            viaje_counts[n] += r.get("numsup_count", 0)
+                            viaje_rows[n].append(r)
+                for n, group in viaje_rows.items():
+                    combined = viaje_counts[n]
+                    ok = combined > 25
+                    is_combined = len(group) > 1
+                    trip_destinos = [g.get("destino", "") for g in group]
+                    for g in group:
+                        g["combined_count"] = combined
+                        g["mercancia_ok"] = ok
+                        g["is_combined"] = is_combined
+                        g["trip_destinos"] = trip_destinos
+
                 added = queue_manager.get_manager().auto_enqueue_from_rows(rows)
             except Exception:
                 pass
@@ -99,6 +143,8 @@ class Api:
     def reload_excel(self) -> dict:
         if not self._last_excel_path:
             return {"ok": False, "error": "No hay archivo previo cargado."}
+        if self._picker_open:
+            return {"ok": False, "error": "picker_open"}
         return self.load_excel(self._last_excel_path)
 
     # ──────────────────────────────────────────────────────────────
@@ -210,7 +256,7 @@ class Api:
     def app_info(self) -> dict:
         return {
             "version": "3.0",
-            "name": "QR Teku",
+            "name": "PULSO",
             "company": "Garvasa",
             "platform": os.name,
         }
@@ -266,9 +312,34 @@ class Api:
             return {"ok": False, "error": str(e)}
 
     def queue_reset_queued(self) -> dict:
-        """Borra todos los items pendientes (queued) para poder recargar el Excel."""
+        """Borra todos los items pendientes (queued y pending_merch) para poder recargar el Excel."""
         try:
             return queue_manager.get_manager().reset_queued()
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def queue_force_queued(self, item_id: str) -> dict:
+        """Fuerza un item pending_merch a la cola como urgente."""
+        try:
+            return queue_manager.get_manager().force_queued(item_id)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def lookup_client(self, cod_cli: str) -> dict:
+        """Busca CIF + Nombre en GECLI2 por CODCLI."""
+        try:
+            cif, nombre = core.odbc_lookup_client(cod_cli or "")
+            return {"ok": True, "cif": cif, "nombre": nombre, "found": bool(cif)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def lookup_gesupe6(self, touliv1_str: str) -> dict:
+        """Cuenta pales supervisados (GESUPE6) para una ruta."""
+        try:
+            touliv1 = int(float(str(touliv1_str).strip()))
+            ruta_carga = touliv1 - 5
+            count = core.odbc_count_gesupe6(ruta_carga)
+            return {"ok": True, "count": count, "ruta_carga": ruta_carga}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 

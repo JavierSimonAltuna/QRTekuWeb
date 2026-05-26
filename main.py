@@ -1,5 +1,5 @@
 """
-QR Teku · Punto de entrada
+PULSO · Punto de entrada
 ==========================
 Crea la ventana PyWebView, expone la API Python al JavaScript, y carga el frontend.
 Usa un servidor HTTP local interno para servir web/ (evita problemas de file:// con blobs).
@@ -64,7 +64,7 @@ def main():
         import tkinter as tk
         from tkinter import messagebox
         root = tk.Tk(); root.withdraw()
-        messagebox.showerror("QR Teku · Error",
+        messagebox.showerror("PULSO · Error",
                              f"No se encontró web/index.html\nEsperado en: {web_dir}")
         return
 
@@ -72,11 +72,11 @@ def main():
     port, ip_lan = start_local_server(web_dir, api)
     url = f"http://127.0.0.1:{port}/index.html"
     loader_url_lan = f"http://{ip_lan}:{port}/index.html?mode=loader"
-    print(f"\n[QR Teku] Supervisor: {url}")
-    print(f"[QR Teku] Cargador (móvil LAN): {loader_url_lan}\n")
+    print(f"\n[PULSO] Supervisor: {url}")
+    print(f"[PULSO] Cargador (móvil LAN): {loader_url_lan}\n")
 
     window = webview.create_window(
-        title="QR Teku · Garvasa",
+        title="PULSO · Garvasa",
         url=url,
         js_api=api,
         width=1440,

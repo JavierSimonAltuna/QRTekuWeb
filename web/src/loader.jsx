@@ -181,7 +181,7 @@ const LoginScreen = ({ onLogin }) => {
       <div style={LS.loginLogoBox}>
         <div style={LS.loginLogo}>B</div>
         <div style={LS.loginBrand}>BLEECKER</div>
-        <div style={LS.loginSubtitle}>App Cargador · QR Teku</div>
+        <div style={LS.loginSubtitle}>App Cargador · PULSO</div>
       </div>
 
       <div style={LS.pinRow}>

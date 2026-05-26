@@ -207,7 +207,7 @@ const QRTekuApp = () => {
 
   const handleImport = async () => {
     if (!connected) {
-      pushToast("Función disponible solo dentro de QRTeku.exe", "info");
+      pushToast("Función disponible solo dentro de Pulso.exe", "info");
       return;
     }
     try {
@@ -332,7 +332,7 @@ const QRTekuApp = () => {
             <span style={S.logoBar} />
           </div>
           <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: "#fafaf9", letterSpacing: -0.3 }}>QR Teku</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "#fafaf9", letterSpacing: -0.3 }}>PULSO</span>
             <span style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", letterSpacing: 0.3 }}>Garvasa · v3.2</span>
           </div>
           {hasFile && (
@@ -533,7 +533,7 @@ const QRTekuApp = () => {
       </div>
 
       {/* Tweaks */}
-      <TweaksPanel title="Tweaks · QR Teku">
+      <TweaksPanel title="Tweaks · PULSO">
         <TweakSection label="Vista">
           <TweakToggle label="Tabla compacta"   value={tw.denseTable}     onChange={(v) => setTweak("denseTable", v)} />
           <TweakToggle label="Mostrar JSON"     value={tw.showJsonPanel}  onChange={(v) => setTweak("showJsonPanel", v)} />
@@ -556,7 +556,7 @@ const EmptyState = ({ onImport, connected }) => (
       <h2 style={S.emptyH}>Importa un Excel para empezar</h2>
       <p style={S.emptyP}>
         Carga el archivo de cargas del día (.xlsx, .xls o .csv).<br/>
-        QR Teku detecta automáticamente el destino, matrículas, expediciones y precintos,
+        PULSO detecta automáticamente el destino, matrículas, expediciones y precintos,
         y consulta el CIF + Agencia en {connected ? <b>FGE50STO.GEZCAM</b> : <span style={{ color: "#a8a29e" }}>(modo demo)</span>}.
       </p>
       <button onClick={onImport} style={S.emptyBtn}>
