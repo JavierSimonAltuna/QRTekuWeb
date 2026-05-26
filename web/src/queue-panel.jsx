@@ -12,6 +12,8 @@ const QueuePanel = ({ pushToast }) => {
   const [activeTab, setActiveTab] = useState("cola");
   const [reassignFor, setReassignFor] = useState(null);
   const [search, setSearch] = useState("");
+  const [showOdbc, setShowOdbc] = useState(false);
+  const [odbcLog, setOdbcLog] = useState([]);
 
   const refresh = useCallback(async () => {
     try {
@@ -48,6 +50,12 @@ const QueuePanel = ({ pushToast }) => {
     const r = await window.api.call("queue_force_queued", id);
     if (r.ok) { pushToast("Priorizada a la cola", "success"); refresh(); setActiveTab("cola"); }
     else pushToast(r.error || "Error", "error");
+  };
+
+  const handleOpenOdbc = async () => {
+    const r = await window.api.call("get_odbc_diagnostics");
+    if (r.ok) setOdbcLog(r.log || []);
+    setShowOdbc(true);
   };
 
   const handleRefreshNumsup = async (item_id, ruta_carga) => {
@@ -113,6 +121,9 @@ const QueuePanel = ({ pushToast }) => {
         <button onClick={refresh} style={QS.refreshBtn} title="Refrescar">
           <IconRefresh size={14} />
           Refrescar
+        </button>
+        <button onClick={handleOpenOdbc} style={QS.odbcBtn} title="Diagnóstico ODBC">
+          ODBC
         </button>
         {(snap.counts.queued + (snap.counts.pending_merch || 0)) > 0 && (
           <button onClick={handleResetQueued} style={QS.clearBtn} title="Vaciar cola de pendientes">
@@ -328,9 +339,81 @@ const QueuePanel = ({ pushToast }) => {
           })}
         </div>
       )}
+
+      {/* ─── Modal diagnóstico ODBC ─── */}
+      {showOdbc && (
+        <OdbcModal log={odbcLog} onClose={() => setShowOdbc(false)} />
+      )}
     </div>
   );
 };
+
+// ───────────────────────────────────────────────────────────────
+// Modal ODBC
+// ───────────────────────────────────────────────────────────────
+const STATUS_COLOR = {
+  OK:        { bg: "#dcfce7", text: "#15803d" },
+  CACHE:     { bg: "#f4f4f3", text: "#78716c" },
+  NOT_FOUND: { bg: "#fef3c7", text: "#b45309" },
+  ERROR:     { bg: "#fee2e2", text: "#b91c1c" },
+};
+
+const OdbcModal = ({ log, onClose }) => (
+  <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center" }}
+    onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div style={{ background: "#fff", borderRadius: 12, width: 760, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.25)", overflow: "hidden" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: "1px solid #e7e5e4" }}>
+        <div>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#1c1917" }}>Diagnóstico ODBC</span>
+          <span style={{ fontSize: 11, color: "#a8a29e", marginLeft: 10 }}>{log.length} operaciones recientes</span>
+        </div>
+        <button onClick={onClose} style={{ background: "transparent", border: "none", fontSize: 18, color: "#a8a29e", cursor: "pointer", lineHeight: 1 }}>✕</button>
+      </div>
+      {/* Leyenda */}
+      <div style={{ display: "flex", gap: 12, padding: "8px 20px", borderBottom: "1px solid #f4f4f3", flexShrink: 0 }}>
+        {Object.entries(STATUS_COLOR).map(([k, v]) => (
+          <span key={k} style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: v.bg, color: v.text }}>{k}</span>
+        ))}
+      </div>
+      {/* Log */}
+      <div style={{ overflowY: "auto", flex: 1 }}>
+        {log.length === 0 ? (
+          <div style={{ padding: "40px 20px", textAlign: "center", color: "#a8a29e", fontSize: 12 }}>
+            Sin operaciones registradas aún. Carga el Excel para iniciar consultas ODBC.
+          </div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+            <thead>
+              <tr style={{ position: "sticky", top: 0, background: "#fafaf9" }}>
+                {["Hora", "Operación", "Clave", "Estado", "Valor", "Error"].map((h) => (
+                  <th key={h} style={{ padding: "6px 12px", textAlign: "left", fontWeight: 700, fontSize: 10, letterSpacing: 0.8, color: "#a8a29e", textTransform: "uppercase", borderBottom: "1px solid #e7e5e4", whiteSpace: "nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {log.map((entry, i) => {
+                const sc = STATUS_COLOR[entry.status] || STATUS_COLOR.CACHE;
+                return (
+                  <tr key={i} style={{ borderBottom: "1px solid #f4f4f3" }}>
+                    <td style={{ padding: "5px 12px", fontFamily: "ui-monospace, monospace", color: "#78716c", whiteSpace: "nowrap" }}>{entry.ts}</td>
+                    <td style={{ padding: "5px 12px", fontWeight: 600, color: "#1c1917" }}>{entry.op}</td>
+                    <td style={{ padding: "5px 12px", fontFamily: "ui-monospace, monospace", color: "#57534e" }}>{entry.key}</td>
+                    <td style={{ padding: "5px 12px" }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: sc.bg, color: sc.text }}>{entry.status}</span>
+                    </td>
+                    <td style={{ padding: "5px 12px", fontFamily: "ui-monospace, monospace", color: "#1c1917", fontWeight: 600 }}>{entry.value}</td>
+                    <td style={{ padding: "5px 12px", color: "#b91c1c", fontFamily: "ui-monospace, monospace", fontSize: 10.5, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={entry.error}>{entry.error}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  </div>
+);
 
 // ───────────────────────────────────────────────────────────────
 // Tarjetas
@@ -620,6 +703,7 @@ const QS = {
   root: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0, background: "#fafaf9" },
   stats: { display: "flex", alignItems: "center", padding: "14px 24px", background: "#fff", borderBottom: "1px solid #e7e5e4", flexShrink: 0 },
   refreshBtn: { display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: "#fafaf9", border: "1px solid #e7e5e4", borderRadius: 8, fontSize: 12, color: "#57534e", cursor: "pointer", fontFamily: "inherit", marginRight: 6 },
+  odbcBtn: { display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "#15803d", cursor: "pointer", fontFamily: "inherit", marginRight: 6, letterSpacing: 0.5 },
   clearBtn: { display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: "#fff", border: "1px solid #fecaca", borderRadius: 8, fontSize: 12, color: "#dc2626", cursor: "pointer", fontFamily: "inherit" },
 
   tabBar: { display: "flex", background: "#fff", borderBottom: "1px solid #e7e5e4", flexShrink: 0, padding: "0 16px", gap: 4 },

@@ -422,3 +422,10 @@ class Api:
             return mgr.upsert_loader({"id": loader_id, "muelle_actual": str(muelle)})
         except Exception as e:
             return {"ok": False, "error": str(e)}
+
+    def get_odbc_diagnostics(self) -> dict:
+        """Devuelve el log de operaciones ODBC recientes para diagnóstico."""
+        try:
+            return {"ok": True, "log": core.get_odbc_log()}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "log": []}

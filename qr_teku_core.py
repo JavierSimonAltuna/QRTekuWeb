@@ -15,6 +15,7 @@ import json
 import platform
 import subprocess
 import shutil
+from collections import deque
 from pathlib import Path
 from datetime import datetime
 
@@ -60,6 +61,24 @@ _odbc_cache: dict[str, tuple[str, str]] = {}
 _client_cache: dict[str, tuple[str, str]] = {}
 _touliv1_cache: dict[str, "int | None"] = {}
 _df_chf_cache: pd.DataFrame | None = None
+
+# Log de diagnóstico ODBC (últimas 100 operaciones)
+_odbc_log: deque = deque(maxlen=100)
+
+
+def _log_odbc(op: str, key: str, status: str, value=None, error: str = ""):
+    _odbc_log.appendleft({
+        "ts": datetime.now().strftime("%H:%M:%S"),
+        "op": op,
+        "key": key,
+        "status": status,
+        "value": str(value) if value is not None else "",
+        "error": error,
+    })
+
+
+def get_odbc_log() -> list:
+    return list(_odbc_log)
 
 
 # ─── Utilidades ─────────────────────────────────────────────────────────
@@ -567,7 +586,9 @@ def odbc_lookup_touliv1(cod_cli: str) -> "int | None":
     if not key or key == "00000000":
         return None
     if key in _touliv1_cache:
-        return _touliv1_cache[key]
+        cached = _touliv1_cache[key]
+        _log_odbc("TOULIV1", key, "CACHE", cached)
+        return cached
     result = None
     try:
         import pyodbc
@@ -585,8 +606,12 @@ def odbc_lookup_touliv1(cod_cli: str) -> "int | None":
                 result = None
         cur.close()
         conn.close()
-    except Exception:
-        pass
+        if result is not None:
+            _log_odbc("TOULIV1", key, "OK", result)
+        else:
+            _log_odbc("TOULIV1", key, "NOT_FOUND")
+    except Exception as e:
+        _log_odbc("TOULIV1", key, "ERROR", error=str(e))
     _touliv1_cache[key] = result
     return result
 
@@ -596,6 +621,7 @@ def odbc_count_gesupe6(ruta_carga: int) -> int:
     Cuenta pales supervisados para una ruta: COUNT(*) en GESUPE6
     WHERE TOULIV=ruta_carga AND ETASUP=30. Sin caché (tiempo real).
     """
+    key = str(ruta_carga)
     try:
         import pyodbc
         conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=5)
@@ -607,8 +633,11 @@ def odbc_count_gesupe6(ruta_carga: int) -> int:
         row = cur.fetchone()
         cur.close()
         conn.close()
-        return int(row[0]) if row else 0
-    except Exception:
+        count = int(row[0]) if row else 0
+        _log_odbc("GESUPE6", key, "OK", count)
+        return count
+    except Exception as e:
+        _log_odbc("GESUPE6", key, "ERROR", error=str(e))
         return 0
 
 
