@@ -332,12 +332,15 @@ const QRTekuApp = () => {
       <header style={S.top}>
         <div style={S.brandRow}>
           <img
-            src="assets/pulso-icon.svg"
+            src="assets/icon-rojo.png"
             alt="PULSO"
             style={{ width: 34, height: 34, borderRadius: 8, flexShrink: 0 }}
             onError={(e) => {
-              e.target.style.display = "none";
-              e.target.nextElementSibling.style.display = "flex";
+              e.target.src = "assets/pulso-icon.svg";
+              e.target.onerror = () => {
+                e.target.style.display = "none";
+                e.target.nextElementSibling.style.display = "flex";
+              };
             }}
           />
           <div style={{ ...S.logoMark, display: "none" }}>
