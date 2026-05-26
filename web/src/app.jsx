@@ -156,7 +156,7 @@ const QRTekuApp = () => {
 
   // ── Selection + ODBC lookup ────────────────────────────────────
   const lookupCifAgencia = useCallback(async (idx, row) => {
-    if (!connected) return;
+    if (!apiReady()) return;
     const matricula = (row.matriculas || "").split("/")[0]?.trim();
     if (!matricula) return;
     setLoadingOdbc(true);
@@ -176,7 +176,7 @@ const QRTekuApp = () => {
       setLoadingOdbc(false);
       pushToast(`ODBC error: ${err.message || err}`, "error");
     }
-  }, [connected, pushToast]);
+  }, [pushToast]);
 
   const selectRow = useCallback((idx) => {
     if (idx === selectedIdx) { setSelectedIdx(null); return; }
@@ -225,8 +225,11 @@ const QRTekuApp = () => {
   // Meta para el Word (no va en el QR)
   const buildMeta = (state) => ({ playa: state.PL || "", muelle: state.MU || "" });
 
+  // Comprueba el bridge directamente en el momento de la llamada (no React state)
+  const apiReady = () => !!(window.pywebview && window.pywebview.api);
+
   const handleImport = async () => {
-    if (!connected) {
+    if (!apiReady()) {
       pushToast("Función disponible solo dentro de Pulso.exe", "info");
       return;
     }
@@ -246,7 +249,7 @@ const QRTekuApp = () => {
   };
 
   const handleReload = async () => {
-    if (!connected) return;
+    if (!apiReady()) return;
     const res = await window.pywebview.api.reload_excel();
     if (res.ok) {
       setRows(res.rows);
@@ -271,7 +274,7 @@ const QRTekuApp = () => {
     const meta = buildMeta(state);
     const precintos = state.precintos.map((p) => ({ centro: p.centro, precinto: p.code }));
 
-    if (connected) {
+    if (apiReady()) {
       try {
         const res = await window.pywebview.api.generate_word_and_print(payload, r.destino, precintos, true, meta);
         if (!res.ok) { pushToast(`Error: ${res.error}`, "error"); return; }
@@ -290,7 +293,7 @@ const QRTekuApp = () => {
   const copyJSON = (idx) => {
     const compact = JSON.stringify(buildPayload(editing[idx]));
     if (navigator.clipboard) navigator.clipboard.writeText(compact);
-    else if (connected) window.pywebview.api.copy_to_clipboard(compact);
+    else if (apiReady()) window.pywebview.api.copy_to_clipboard(compact);
     pushToast("JSON copiado al portapapeles", "success");
   };
 
