@@ -553,10 +553,9 @@ def odbc_lookup_chf(matricula: str) -> tuple[str, str]:
 def odbc_lookup_client(cod_cli: str) -> tuple[str, str]:
     """
     Busca CIF + Agencia por CODCLI en FGE50STO.GECLI2.
-    cod_cli debe pasarse zero-padded a 8 chars.
     Devuelve (CIF, Agencia). Cachea resultados en _client_cache.
     """
-    key = str(cod_cli).strip().zfill(8)
+    key = _to_codcli_key(cod_cli)
     if not key or key == "00000000":
         return "", ""
     if key in _client_cache:
@@ -568,7 +567,7 @@ def odbc_lookup_client(cod_cli: str) -> tuple[str, str]:
         cur = conn.cursor()
         cur.execute(
             f"SELECT NIFCLI, NOMCLI FROM {TABLE_GECLI2} WHERE CODCLI = ? FETCH FIRST 1 ROWS ONLY",
-            key,
+            int(key),
         )
         row = cur.fetchone()
         if row:
@@ -582,12 +581,33 @@ def odbc_lookup_client(cod_cli: str) -> tuple[str, str]:
     return cif, agencia
 
 
+def _to_codcli_key(cod_cli) -> str:
+    """
+    Convierte cod_centro a clave de 8 dígitos para CODCLI en AS400.
+    AS400 CODCLI es campo NUMÉRICO — solo acepta dígitos.
+    Ejemplos: "34" → "00000034", "34.0" → "00000034", "0034" → "00000034".
+    Devuelve "" si el valor no es convertible a entero.
+    """
+    s = str(cod_cli).strip()
+    # Pandas representa enteros como float: "34.0" → limpiar ".0"
+    if "." in s:
+        try:
+            s = str(int(float(s)))
+        except (ValueError, TypeError):
+            return ""
+    s = s.zfill(8)
+    # Rechazar claves con caracteres no numéricos (e.g. "nan", "None")
+    if not s.isdigit():
+        return ""
+    return s
+
+
 def odbc_lookup_touliv1(cod_cli: str) -> "int | None":
     """
     Busca TOULIV1 en FGE50STO.GECLI2 por CODCLI.
     Devuelve el int o None si no se encuentra. Cachea resultados.
     """
-    key = str(cod_cli).strip().zfill(8)
+    key = _to_codcli_key(cod_cli)
     if not key or key == "00000000":
         return None
     if key in _touliv1_cache:
@@ -601,7 +621,7 @@ def odbc_lookup_touliv1(cod_cli: str) -> "int | None":
         cur = conn.cursor()
         cur.execute(
             f"SELECT TOULIV1 FROM {TABLE_GECLI2} WHERE CODCLI = ? AND CODACT = 101 FETCH FIRST 1 ROWS ONLY",
-            key,
+            int(key),
         )
         row = cur.fetchone()
         if row and row[0] is not None:
