@@ -150,6 +150,23 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e), "trace": traceback.format_exc()}
 
+    def load_excel_base64(self, filename: str, b64_content: str) -> dict:
+        """Carga un Excel desde contenido base64 (fallback para navegador sin pywebview)."""
+        import base64 as _b64, tempfile, os as _os
+        try:
+            data = _b64.b64decode(b64_content)
+            suffix = _os.path.splitext(filename)[1] or ".xlsx"
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+                f.write(data)
+                tmp_path = f.name
+            try:
+                return self.load_excel(tmp_path)
+            finally:
+                try: _os.unlink(tmp_path)
+                except: pass
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def reload_excel(self) -> dict:
         if not self._last_excel_path:
             return {"ok": False, "error": "No hay archivo previo cargado."}

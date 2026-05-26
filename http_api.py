@@ -24,6 +24,8 @@ ALLOWED_METHODS = {
     "loader_request_next",
     "loader_finish",
     "loader_set_muelle",
+    # Cargas (supervisor desde navegador)
+    "load_excel_base64",
     # Cola (supervisor, lectura/escritura)
     "queue_snapshot",
     "queue_enqueue_manual",

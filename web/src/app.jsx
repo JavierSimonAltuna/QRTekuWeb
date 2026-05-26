@@ -229,31 +229,47 @@ const QRTekuApp = () => {
   const apiReady = () => !!(window.pywebview && window.pywebview.api);
 
   const handleImport = async () => {
-    if (!apiReady()) {
-      // Diagnóstico: muestra qué hay en window.pywebview para entender el fallo
+    if (apiReady()) {
+      // Ventana PyWebView: diálogo nativo de archivo
       try {
-        const pv = window.pywebview;
-        const info = pv
-          ? `pywebview OK, api=${typeof pv.api}, keys=${Object.keys(pv).join(",")}`
-          : "window.pywebview no existe";
-        pushToast(info, "error");
-      } catch(ex) {
-        pushToast("No API: " + ex.message, "error");
+        const path = await window.pywebview.api.pick_excel();
+        if (!path) return;
+        const res = await window.pywebview.api.load_excel(path);
+        if (!res.ok) { pushToast(`Error: ${res.error}`, "error"); return; }
+        setRows(res.rows);
+        setFileInfo({ name: res.filename, count: res.count, fecha: res.fecha_b2, path });
+        setSelectedIdx(null);
+        setEditing({});
+        pushToast(`${res.count} filas cargadas desde ${res.filename}`, "success");
+      } catch (e) {
+        pushToast(`Error: ${e.message || e}`, "error");
       }
-      return;
-    }
-    try {
-      const path = await window.pywebview.api.pick_excel();
-      if (!path) return;
-      const res = await window.pywebview.api.load_excel(path);
-      if (!res.ok) { pushToast(`Error: ${res.error}`, "error"); return; }
-      setRows(res.rows);
-      setFileInfo({ name: res.filename, count: res.count, fecha: res.fecha_b2, path });
-      setSelectedIdx(null);
-      setEditing({});
-      pushToast(`${res.count} filas cargadas desde ${res.filename}`, "success");
-    } catch (e) {
-      pushToast(`Error: ${e.message || e}`, "error");
+    } else {
+      // Navegador: input file HTML → envía base64 al servidor HTTP
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".xlsx,.xls,.csv";
+      input.onchange = async () => {
+        const file = input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+          try {
+            const b64 = ev.target.result.split(",")[1];
+            const res = await window.api.call("load_excel_base64", file.name, b64);
+            if (!res.ok) { pushToast(`Error: ${res.error}`, "error"); return; }
+            setRows(res.rows);
+            setFileInfo({ name: res.filename, count: res.count, fecha: res.fecha_b2, path: file.name });
+            setSelectedIdx(null);
+            setEditing({});
+            pushToast(`${res.count} filas cargadas desde ${res.filename}`, "success");
+          } catch (e) {
+            pushToast(`Error: ${e.message || e}`, "error");
+          }
+        };
+        reader.readAsDataURL(file);
+      };
+      input.click();
     }
   };
 
