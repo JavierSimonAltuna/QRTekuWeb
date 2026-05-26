@@ -52,6 +52,12 @@ const QueuePanel = ({ pushToast }) => {
     else pushToast(r.error || "Error", "error");
   };
 
+  const handleSetComment = async (id, text) => {
+    const r = await window.api.call("queue_set_comment", id, text);
+    if (r.ok) refresh();
+    else pushToast(r.error || "Error al guardar comentario", "error");
+  };
+
   const handleSendToPendingMerch = async (id) => {
     const r = await window.api.call("queue_send_to_pending_merch", id);
     if (r.ok) { pushToast("Movido a Sin mercancía", "info"); refresh(); setActiveTab("sinmerch"); }
@@ -215,6 +221,7 @@ const QueuePanel = ({ pushToast }) => {
                   showReassignMenu={reassignFor === it.id}
                   onOpenReassign={() => setReassignFor(reassignFor === it.id ? null : it.id)}
                   onSendToPendingMerch={() => handleSendToPendingMerch(it.id)}
+                  onSetComment={(text) => handleSetComment(it.id, text)}
                 />
               ))}
             </div>
@@ -441,7 +448,11 @@ const ComboBadge = () => (
   </span>
 );
 
-const QueueCard = ({ item, position, loaders, onToggleUrgent, onRemove, onReassign, showReassignMenu, onOpenReassign, onSendToPendingMerch }) => (
+const QueueCard = ({ item, position, loaders, onToggleUrgent, onRemove, onReassign, showReassignMenu, onOpenReassign, onSendToPendingMerch, onSetComment }) => {
+  const [showCommentInput, setShowCommentInput] = React.useState(false);
+  const [commentDraft, setCommentDraft] = React.useState(item.comment || "");
+  const saveComment = () => { onSetComment(commentDraft.trim()); setShowCommentInput(false); };
+  return (
   <div style={{
     ...QS.card,
     borderLeft: item.urgente ? "3px solid #dc2626" : "3px solid transparent",
@@ -464,6 +475,10 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onRemove, onReassi
         <button onClick={onSendToPendingMerch} title="Mover a Sin mercancía"
           style={{ ...QS.iconBtn, color: "#d97706", fontSize: 11, fontWeight: 700 }}>
           →⚠
+        </button>
+        <button onClick={() => setShowCommentInput((v) => !v)} title="Añadir nota para el cargador"
+          style={{ ...QS.iconBtn, color: item.comment ? "#0ea5e9" : "#a8a29e" }}>
+          💬
         </button>
         <button onClick={onRemove} title="Quitar de cola"
           style={{ ...QS.iconBtn, color: "#a8a29e" }}>
@@ -504,6 +519,34 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onRemove, onReassi
       <div style={QS.cardTractora}>{item.tractora}</div>
     </div>
 
+    {/* Nota existente (siempre visible si hay texto) */}
+    {item.comment && !showCommentInput && (
+      <div style={QS.commentDisplay}>
+        <span style={{ fontSize: 11, color: "#92400e" }}>📌</span>
+        <span style={{ flex: 1, fontSize: 11.5, color: "#1c1917" }}>{item.comment}</span>
+        <button onClick={() => setShowCommentInput(true)} style={{ fontSize: 10, color: "#0ea5e9", background: "none", border: "none", cursor: "pointer", padding: 0 }}>editar</button>
+      </div>
+    )}
+
+    {/* Input de comentario */}
+    {showCommentInput && (
+      <div style={QS.commentInputWrap}>
+        <textarea
+          value={commentDraft}
+          onChange={(e) => setCommentDraft(e.target.value)}
+          placeholder="Nota para el cargador (informativa)…"
+          rows={2}
+          autoFocus
+          style={QS.commentTextarea}
+        />
+        <div style={{ display: "flex", gap: 6, marginTop: 5 }}>
+          <button onClick={saveComment} style={QS.commentSaveBtn}>Guardar</button>
+          <button onClick={() => { setCommentDraft(item.comment || ""); setShowCommentInput(false); }} style={QS.commentCancelBtn}>Cancelar</button>
+          {item.comment && <button onClick={() => { setCommentDraft(""); onSetComment(""); setShowCommentInput(false); }} style={{ ...QS.commentCancelBtn, color: "#dc2626" }}>Borrar</button>}
+        </div>
+      </div>
+    )}
+
     {showReassignMenu && (
       <div style={QS.reassignMenu}>
         <div style={QS.reassignHint}>Asignar a:</div>
@@ -519,7 +562,8 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onRemove, onReassi
       </div>
     )}
   </div>
-);
+  );
+};
 
 const AssignedCard = ({ item, loader, loaders, onReassign, onRemove, showReassignMenu, onOpenReassign }) => (
   <div style={{ ...QS.card, background: "#eff6ff", borderLeft: "3px solid #0ea5e9" }}>
@@ -752,6 +796,12 @@ const QS = {
   meta: { display: "flex", flexDirection: "column", lineHeight: 1.1 },
   metaLbl: { fontSize: 9, fontWeight: 700, letterSpacing: 1, color: "#a8a29e", textTransform: "uppercase" },
   metaVal: { fontSize: 12, fontWeight: 700, color: "#1c1917", fontFamily: "ui-monospace, monospace", marginTop: 2 },
+
+  commentDisplay: { display: "flex", alignItems: "flex-start", gap: 6, marginTop: 8, padding: "6px 8px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6 },
+  commentInputWrap: { marginTop: 8, padding: "8px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6 },
+  commentTextarea: { width: "100%", fontSize: 12, padding: "5px 7px", border: "1px solid #fde68a", borderRadius: 4, fontFamily: "inherit", resize: "none", outline: "none", background: "#fff", color: "#1c1917" },
+  commentSaveBtn: { fontSize: 11, padding: "4px 10px", background: "#0ea5e9", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 },
+  commentCancelBtn: { fontSize: 11, padding: "4px 10px", background: "transparent", border: "1px solid #d6d3d1", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", color: "#78716c" },
 
   assignedBy: { display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#0c4a6e", background: "#dbeafe", padding: "2px 8px", borderRadius: 999, fontWeight: 600 },
 

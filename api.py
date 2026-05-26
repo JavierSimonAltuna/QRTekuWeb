@@ -336,6 +336,13 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def queue_set_comment(self, item_id: str, comment: str) -> dict:
+        """Guarda el comentario del supervisor para un item de la cola."""
+        try:
+            return queue_manager.get_manager().set_comment(item_id, str(comment or ""))
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def queue_send_to_pending_merch(self, item_id: str) -> dict:
         """Mueve un item de la cola a Sin mercancía."""
         try:

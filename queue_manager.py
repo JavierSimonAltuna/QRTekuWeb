@@ -278,6 +278,7 @@ class QueueManager:
             "trip_destinos": row.get("trip_destinos", []),
             "touliv1": row.get("touliv1"),
             "ruta_carga": row.get("ruta_carga"),
+            "comment": "",
         }
 
     @staticmethod
@@ -396,6 +397,16 @@ class QueueManager:
                     it["assigned_at"] = datetime.now().isoformat(timespec="seconds")
                     self._save()
                     return {"ok": True, "item": it}
+            return {"ok": False, "error": "No encontrado"}
+
+    def set_comment(self, item_id: str, comment: str) -> dict:
+        """Guarda el comentario del supervisor en un item (visible al cargador)."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id:
+                    it["comment"] = str(comment or "").strip()
+                    self._save()
+                    return {"ok": True}
             return {"ok": False, "error": "No encontrado"}
 
     def set_urgent(self, item_id: str, urgente: bool) -> dict:

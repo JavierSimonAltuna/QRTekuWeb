@@ -183,9 +183,18 @@ const LoginScreen = ({ onLogin }) => {
           src="assets/logo-rojo.png"
           alt="PULSO"
           style={{ height: 70, width: "auto", maxWidth: 260 }}
-          onError={(e) => { e.target.style.display = "none"; e.target.nextElementSibling.style.display = "block"; }}
+          onError={(e) => {
+            e.target.src = "assets/pulso-icon.svg";
+            e.target.style.height = "70px";
+            e.target.style.width = "70px";
+            e.target.style.borderRadius = "16px";
+            e.target.onerror = () => {
+              e.target.style.display = "none";
+              e.target.nextElementSibling.style.display = "flex";
+            };
+          }}
         />
-        <div style={{ display: "none" }}>
+        <div style={{ display: "none", flexDirection: "column", alignItems: "center", gap: 6 }}>
           <div style={LS.loginLogo}>P</div>
           <div style={LS.loginBrand}>PULSO</div>
         </div>
@@ -324,6 +333,17 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize }) => {
             )}
           </div>
         </div>
+
+        {/* ─── Comentario del supervisor ─── */}
+        {item.comment && (
+          <div style={LS.commentCard}>
+            <div style={LS.commentHead}>
+              <span style={LS.commentIcon}>📌</span>
+              <span style={LS.commentLabel}>NOTA DEL SUPERVISOR</span>
+            </div>
+            <div style={LS.commentText}>{item.comment}</div>
+          </div>
+        )}
 
         {/* ─── QR card ─── */}
         <div style={LS.qrCard}>
@@ -620,6 +640,13 @@ const LS = {
   muelleFootKey: { color: "rgba(255,255,255,0.4)", letterSpacing: 0.5 },
   muelleFootVal: { color: "#fafaf9", fontWeight: 600 },
   muelleFootSep: { color: "rgba(255,255,255,0.25)", margin: "0 2px" },
+
+  // ── Comentario supervisor ────────────────────
+  commentCard: { background: "#fffbeb", borderRadius: 12, padding: "12px 14px", marginTop: 10, border: "1px solid #fde68a" },
+  commentHead: { display: "flex", alignItems: "center", gap: 6, marginBottom: 6 },
+  commentIcon: { fontSize: 14, lineHeight: 1 },
+  commentLabel: { fontSize: 9.5, fontWeight: 700, letterSpacing: 1.2, color: "#92400e", textTransform: "uppercase" },
+  commentText: { fontSize: 14, fontWeight: 500, color: "#1c1917", lineHeight: 1.5 },
 
   // ── QR card ───────────────────────────────────
   qrCard: { background: "#fff", borderRadius: 14, padding: "14px 16px 16px", marginTop: 10, boxShadow: "0 1px 2px rgba(0,0,0,0.04)", border: "1px solid #e7e5e4" },
