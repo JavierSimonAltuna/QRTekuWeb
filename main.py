@@ -21,6 +21,8 @@ import webview
 from api import Api
 from http_api import make_handler
 
+HTTP_PORT = int(os.environ.get("PULSO_PORT", 8765))
+
 
 def get_web_dir() -> Path:
     """Carpeta web/ — soporta ejecución normal y PyInstaller (--onefile)."""
@@ -37,11 +39,14 @@ def start_local_server(web_dir: Path, api) -> tuple[int, str]:
       - POST /api/<método> que invoca la API (los mismos métodos que pywebview.api)
     Devuelve (puerto, ip_lan)."""
     handler_cls = make_handler(api, str(web_dir))
-    # Buscar puerto libre
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("0.0.0.0", 0))
-        port = s.getsockname()[1]
-    server = ThreadingHTTPServer(("0.0.0.0", port), handler_cls)
+    port = HTTP_PORT
+    try:
+        server = ThreadingHTTPServer(("0.0.0.0", port), handler_cls)
+    except OSError:
+        # Puerto fijo ocupado: dejar al OS asignar uno libre
+        server = ThreadingHTTPServer(("0.0.0.0", 0), handler_cls)
+        port = server.server_address[1]
+        print(f"[PULSO] Puerto {HTTP_PORT} ocupado, usando {port}")
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 
