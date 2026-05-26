@@ -230,7 +230,16 @@ const QRTekuApp = () => {
 
   const handleImport = async () => {
     if (!apiReady()) {
-      pushToast("Función disponible solo dentro de Pulso.exe", "info");
+      // Diagnóstico: muestra qué hay en window.pywebview para entender el fallo
+      try {
+        const pv = window.pywebview;
+        const info = pv
+          ? `pywebview OK, api=${typeof pv.api}, keys=${Object.keys(pv).join(",")}`
+          : "window.pywebview no existe";
+        pushToast(info, "error");
+      } catch(ex) {
+        pushToast("No API: " + ex.message, "error");
+      }
       return;
     }
     try {
