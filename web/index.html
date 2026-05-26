@@ -4,6 +4,8 @@
 <meta charset="utf-8" />
 <title>PULSO · Garvasa</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" type="image/svg+xml" href="assets/pulso-icon.svg">
+<link rel="icon" type="image/png" href="assets/icon-oscuro.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -35,7 +37,11 @@
   }
   #__loading.fade { opacity: 0; pointer-events: none; }
   #__loading .logo {
-    width: 56px; height: 56px; background: #dc2626; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #__loading .logo img { height: 52px; width: auto; }
+  #__loading .logo .logo-fallback {
+    width: 52px; height: 52px; background: #dc2626; border-radius: 12px;
     display: grid; place-items: center; color: #fff; font-size: 26px; font-weight: 800;
     letter-spacing: -1px; box-shadow: 0 4px 14px rgba(220,38,38,0.25);
   }
@@ -56,7 +62,11 @@
 </head>
 <body>
 <div id="__loading">
-  <div class="logo">G</div>
+  <div class="logo">
+    <img src="assets/logo-negro.png" alt="PULSO"
+         onerror="this.style.display='none';this.nextElementSibling.style.display='grid'">
+    <div class="logo-fallback" style="display:none">P</div>
+  </div>
   <div class="text">Cargando PULSO…</div>
 </div>
 <div id="__error"></div>

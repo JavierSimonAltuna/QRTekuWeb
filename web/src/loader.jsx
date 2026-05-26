@@ -179,9 +179,17 @@ const LoginScreen = ({ onLogin }) => {
   return (
     <div style={LS.loginRoot}>
       <div style={LS.loginLogoBox}>
-        <div style={LS.loginLogo}>B</div>
-        <div style={LS.loginBrand}>BLEECKER</div>
-        <div style={LS.loginSubtitle}>App Cargador · PULSO</div>
+        <img
+          src="assets/logo-rojo.png"
+          alt="PULSO"
+          style={{ height: 70, width: "auto", maxWidth: 260 }}
+          onError={(e) => { e.target.style.display = "none"; e.target.nextElementSibling.style.display = "block"; }}
+        />
+        <div style={{ display: "none" }}>
+          <div style={LS.loginLogo}>P</div>
+          <div style={LS.loginBrand}>PULSO</div>
+        </div>
+        <div style={LS.loginSubtitle}>App Cargador · Bleecker</div>
       </div>
 
       <div style={LS.pinRow}>

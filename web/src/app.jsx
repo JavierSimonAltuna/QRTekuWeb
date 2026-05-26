@@ -331,8 +331,17 @@ const QRTekuApp = () => {
       {/* ─── Dark top bar (estilo Variant C) ───────────────────── */}
       <header style={S.top}>
         <div style={S.brandRow}>
-          <div style={S.logoMark}>
-            <span style={S.logoG}>G</span>
+          <img
+            src="assets/pulso-icon.svg"
+            alt="PULSO"
+            style={{ width: 34, height: 34, borderRadius: 8, flexShrink: 0 }}
+            onError={(e) => {
+              e.target.style.display = "none";
+              e.target.nextElementSibling.style.display = "flex";
+            }}
+          />
+          <div style={{ ...S.logoMark, display: "none" }}>
+            <span style={S.logoG}>P</span>
             <span style={S.logoBar} />
           </div>
           <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
