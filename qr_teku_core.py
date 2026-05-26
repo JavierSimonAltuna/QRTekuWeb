@@ -82,8 +82,15 @@ def get_odbc_log() -> list:
 
 
 def clear_touliv1_cache() -> None:
-    """Limpia la caché de TOULIV1 para forzar re-consulta en el siguiente ciclo."""
+    """Limpia la caché de TOULIV1 para forzar re-consulta (solo al cargar archivo nuevo)."""
     _touliv1_cache.clear()
+
+
+def clear_chf_caches() -> None:
+    """Limpia las cachés de CIF/agencia para reflejar cambios en AS400 o en Excel.
+    Seguro en auto-reload porque solo hay pocos vehículos únicos por fichero."""
+    _odbc_cache.clear()
+    _client_cache.clear()
 
 
 # ─── Utilidades ─────────────────────────────────────────────────────────

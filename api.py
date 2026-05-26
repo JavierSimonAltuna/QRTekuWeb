@@ -155,6 +155,7 @@ class Api:
             return {"ok": False, "error": "No hay archivo previo cargado."}
         if self._picker_open:
             return {"ok": False, "error": "picker_open"}
+        core.clear_chf_caches()   # CIF/agencia siempre frescos; TOULIV1 permanece cacheado
         return self.load_excel(self._last_excel_path)
 
     # ──────────────────────────────────────────────────────────────
