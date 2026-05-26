@@ -68,7 +68,7 @@ const QRTekuApp = () => {
           if (res.auto_enqueued > 0) pushToast(`${res.auto_enqueued} carga(s) añadidas a la cola Bleecker`, "success");
         }
       } catch (e) { /* silencio */ }
-    }, 20000);
+    }, 5000);
     return () => clearInterval(interval);
   }, [connected, tw.autoRefresh, fileInfo]);
 
@@ -82,7 +82,7 @@ const QRTekuApp = () => {
       } catch (_) { /* silencio */ }
     };
     tick();
-    const t = setInterval(tick, 8000);
+    const t = setInterval(tick, 5000);
     return () => { alive = false; clearInterval(t); };
   }, []);
 

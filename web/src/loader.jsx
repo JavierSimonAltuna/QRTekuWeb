@@ -39,7 +39,7 @@ const LoaderApp = () => {
   useEffect(() => {
     if (!loader) return;
     pollCurrent();
-    const t = setInterval(pollCurrent, 12000); // refrescar cada 12s
+    const t = setInterval(pollCurrent, 5000);
     return () => clearInterval(t);
     // eslint-disable-next-line
   }, [loader]);
