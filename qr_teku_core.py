@@ -81,6 +81,11 @@ def get_odbc_log() -> list:
     return list(_odbc_log)
 
 
+def clear_touliv1_cache() -> None:
+    """Limpia la caché de TOULIV1 para forzar re-consulta en el siguiente ciclo."""
+    _touliv1_cache.clear()
+
+
 # ─── Utilidades ─────────────────────────────────────────────────────────
 def _norm_tractor(s: str) -> str:
     return (s or "").upper().replace(" ", "").replace("-", "").strip()
@@ -595,7 +600,7 @@ def odbc_lookup_touliv1(cod_cli: str) -> "int | None":
         conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=5)
         cur = conn.cursor()
         cur.execute(
-            f"SELECT TOULIV1 FROM {TABLE_GECLI2} WHERE CODCLI = ? FETCH FIRST 1 ROWS ONLY",
+            f"SELECT TOULIV1 FROM {TABLE_GECLI2} WHERE CODCLI = ? AND CODACT = 101 FETCH FIRST 1 ROWS ONLY",
             key,
         )
         row = cur.fetchone()

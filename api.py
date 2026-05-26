@@ -71,6 +71,7 @@ class Api:
         try:
             rows, fecha_b2 = core.load_excel(path)
             self._last_excel_path = path
+            core.clear_touliv1_cache()
             # Enriquecer las filas aculadas con CIF/Agencia (mejor esfuerzo)
             # y empujarlas a la cola Bleecker automáticamente.
             added = 0
