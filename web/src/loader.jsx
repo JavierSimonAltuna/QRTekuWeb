@@ -243,6 +243,8 @@ const WaitingScreen = ({ loader, queuedCount, requesting, onRequest, onLogout })
       <div style={LS.waitDot} />
       <div style={LS.waitTopText}>EN ESPERA</div>
       <div style={{ flex: 1 }} />
+      <img src="assets/pulso-icon.svg" alt="PULSO" style={LS.topLogo}
+        onError={(e) => { e.target.style.display = "none"; }} />
       <button onClick={onLogout} style={LS.waitLogout}>Cerrar sesión</button>
     </div>
 
@@ -281,6 +283,8 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize }) => {
           <span style={LS.topGreenDot} />
           <span style={LS.topBarTitle}>CARGA ASIGNADA</span>
         </div>
+        <img src="assets/pulso-icon.svg" alt="PULSO" style={LS.topLogo}
+          onError={(e) => { e.target.style.display = "none"; }} />
         <div style={LS.topBarRight}>
           <span style={LS.topBarTicket}>#{item.id}</span>
           <span style={LS.topBarSep}>·</span>
@@ -611,6 +615,9 @@ const LS = {
   waitLoaderName: { fontSize: 14, fontWeight: 600, color: "#fafaf9" },
   waitMuelleHint: { fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 4, marginBottom: 48 },
   waitCTA: { width: "100%", maxWidth: 420, padding: "20px 24px", borderRadius: 14, border: "none", fontSize: 16, fontWeight: 700, letterSpacing: 0.5, fontFamily: "inherit", textTransform: "uppercase" },
+
+  // Logo pequeño en barras superiores
+  topLogo: { width: 28, height: 28, borderRadius: 7, flexShrink: 0, margin: "0 8px" },
 
   // ── Top bar (carga asignada) ─────────────────
   assignRoot: { width: "100%", minHeight: "100%", height: "100%", display: "flex", flexDirection: "column", background: "#f4f4f3", position: "relative" },
