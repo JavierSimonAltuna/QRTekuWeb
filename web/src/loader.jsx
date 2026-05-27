@@ -39,7 +39,7 @@ const LoaderApp = () => {
   useEffect(() => {
     if (!loader) return;
     pollCurrent();
-    const t = setInterval(pollCurrent, 12000); // refrescar cada 12s
+    const t = setInterval(pollCurrent, 3000);
     return () => clearInterval(t);
     // eslint-disable-next-line
   }, [loader]);
@@ -179,9 +179,26 @@ const LoginScreen = ({ onLogin }) => {
   return (
     <div style={LS.loginRoot}>
       <div style={LS.loginLogoBox}>
-        <div style={LS.loginLogo}>B</div>
-        <div style={LS.loginBrand}>BLEECKER</div>
-        <div style={LS.loginSubtitle}>App Cargador · QR Teku</div>
+        <img
+          src="assets/logo-rojo.png"
+          alt="PULSO"
+          style={{ height: 70, width: "auto", maxWidth: 260 }}
+          onError={(e) => {
+            e.target.src = "assets/pulso-icon.svg";
+            e.target.style.height = "70px";
+            e.target.style.width = "70px";
+            e.target.style.borderRadius = "16px";
+            e.target.onerror = () => {
+              e.target.style.display = "none";
+              e.target.nextElementSibling.style.display = "flex";
+            };
+          }}
+        />
+        <div style={{ display: "none", flexDirection: "column", alignItems: "center", gap: 6 }}>
+          <div style={LS.loginLogo}>P</div>
+          <div style={LS.loginBrand}>PULSO</div>
+        </div>
+        <div style={LS.loginSubtitle}>App Cargador · Bleecker</div>
       </div>
 
       <div style={LS.pinRow}>
@@ -226,6 +243,8 @@ const WaitingScreen = ({ loader, queuedCount, requesting, onRequest, onLogout })
       <div style={LS.waitDot} />
       <div style={LS.waitTopText}>EN ESPERA</div>
       <div style={{ flex: 1 }} />
+      <img src="assets/pulso-icon.svg" alt="PULSO" style={LS.topLogo}
+        onError={(e) => { e.target.style.display = "none"; }} />
       <button onClick={onLogout} style={LS.waitLogout}>Cerrar sesión</button>
     </div>
 
@@ -264,6 +283,8 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize }) => {
           <span style={LS.topGreenDot} />
           <span style={LS.topBarTitle}>CARGA ASIGNADA</span>
         </div>
+        <img src="assets/pulso-icon.svg" alt="PULSO" style={LS.topLogo}
+          onError={(e) => { e.target.style.display = "none"; }} />
         <div style={LS.topBarRight}>
           <span style={LS.topBarTicket}>#{item.id}</span>
           <span style={LS.topBarSep}>·</span>
@@ -279,6 +300,16 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize }) => {
             <span style={LS.muelleLabel}>MUELLE</span>
             <span style={LS.muellePill}>P-{item.playa ? Math.ceil((parseInt(item.playa, 10) || 0) / 100) || 1 : 1}</span>
           </div>
+          {/* Viaje combinado: mostrar todos los centros */}
+          {item.is_combined && item.trip_destinos && item.trip_destinos.length > 1 && (
+            <div style={{
+              fontSize: 10.5, fontWeight: 700, color: "#6d28d9",
+              background: "#f5f3ff", borderRadius: 6, padding: "6px 10px",
+              letterSpacing: 0.5, marginBottom: 6,
+            }}>
+              VIAJE COMBINADO: {item.trip_destinos.join(" → ")}
+            </div>
+          )}
           <div style={LS.muelleRow}>
             <div style={LS.muelleNum}>{(item.muelle || "—").padStart(2, "0")}</div>
             <div style={LS.muelleMeta}>
@@ -306,6 +337,17 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize }) => {
             )}
           </div>
         </div>
+
+        {/* ─── Comentario del supervisor ─── */}
+        {item.comment && (
+          <div style={LS.commentCard}>
+            <div style={LS.commentHead}>
+              <span style={LS.commentIcon}>📌</span>
+              <span style={LS.commentLabel}>NOTA DEL SUPERVISOR</span>
+            </div>
+            <div style={LS.commentText}>{item.comment}</div>
+          </div>
+        )}
 
         {/* ─── QR card ─── */}
         <div style={LS.qrCard}>
@@ -574,6 +616,9 @@ const LS = {
   waitMuelleHint: { fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 4, marginBottom: 48 },
   waitCTA: { width: "100%", maxWidth: 420, padding: "20px 24px", borderRadius: 14, border: "none", fontSize: 16, fontWeight: 700, letterSpacing: 0.5, fontFamily: "inherit", textTransform: "uppercase" },
 
+  // Logo pequeño en barras superiores
+  topLogo: { width: 28, height: 28, borderRadius: 7, flexShrink: 0, margin: "0 8px" },
+
   // ── Top bar (carga asignada) ─────────────────
   assignRoot: { width: "100%", minHeight: "100%", height: "100%", display: "flex", flexDirection: "column", background: "#f4f4f3", position: "relative" },
   topBar: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", background: "#fff", borderBottom: "1px solid #e7e5e4", flexShrink: 0 },
@@ -602,6 +647,13 @@ const LS = {
   muelleFootKey: { color: "rgba(255,255,255,0.4)", letterSpacing: 0.5 },
   muelleFootVal: { color: "#fafaf9", fontWeight: 600 },
   muelleFootSep: { color: "rgba(255,255,255,0.25)", margin: "0 2px" },
+
+  // ── Comentario supervisor ────────────────────
+  commentCard: { background: "#fffbeb", borderRadius: 12, padding: "12px 14px", marginTop: 10, border: "1px solid #fde68a" },
+  commentHead: { display: "flex", alignItems: "center", gap: 6, marginBottom: 6 },
+  commentIcon: { fontSize: 14, lineHeight: 1 },
+  commentLabel: { fontSize: 9.5, fontWeight: 700, letterSpacing: 1.2, color: "#92400e", textTransform: "uppercase" },
+  commentText: { fontSize: 14, fontWeight: 500, color: "#1c1917", lineHeight: 1.5 },
 
   // ── QR card ───────────────────────────────────
   qrCard: { background: "#fff", borderRadius: 14, padding: "14px 16px 16px", marginTop: 10, boxShadow: "0 1px 2px rgba(0,0,0,0.04)", border: "1px solid #e7e5e4" },

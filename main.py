@@ -1,5 +1,5 @@
 """
-QR Teku · Punto de entrada
+PULSO · Punto de entrada
 ==========================
 Crea la ventana PyWebView, expone la API Python al JavaScript, y carga el frontend.
 Usa un servidor HTTP local interno para servir web/ (evita problemas de file:// con blobs).
@@ -21,6 +21,8 @@ import webview
 from api import Api
 from http_api import make_handler
 
+HTTP_PORT = int(os.environ.get("PULSO_PORT", 8765))
+
 
 def get_web_dir() -> Path:
     """Carpeta web/ — soporta ejecución normal y PyInstaller (--onefile)."""
@@ -37,11 +39,14 @@ def start_local_server(web_dir: Path, api) -> tuple[int, str]:
       - POST /api/<método> que invoca la API (los mismos métodos que pywebview.api)
     Devuelve (puerto, ip_lan)."""
     handler_cls = make_handler(api, str(web_dir))
-    # Buscar puerto libre
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("0.0.0.0", 0))
-        port = s.getsockname()[1]
-    server = ThreadingHTTPServer(("0.0.0.0", port), handler_cls)
+    port = HTTP_PORT
+    try:
+        server = ThreadingHTTPServer(("0.0.0.0", port), handler_cls)
+    except OSError:
+        # Puerto fijo ocupado: dejar al OS asignar uno libre
+        server = ThreadingHTTPServer(("0.0.0.0", 0), handler_cls)
+        port = server.server_address[1]
+        print(f"[PULSO] Puerto {HTTP_PORT} ocupado, usando {port}")
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 
@@ -64,7 +69,7 @@ def main():
         import tkinter as tk
         from tkinter import messagebox
         root = tk.Tk(); root.withdraw()
-        messagebox.showerror("QR Teku · Error",
+        messagebox.showerror("PULSO · Error",
                              f"No se encontró web/index.html\nEsperado en: {web_dir}")
         return
 
@@ -72,11 +77,11 @@ def main():
     port, ip_lan = start_local_server(web_dir, api)
     url = f"http://127.0.0.1:{port}/index.html"
     loader_url_lan = f"http://{ip_lan}:{port}/index.html?mode=loader"
-    print(f"\n[QR Teku] Supervisor: {url}")
-    print(f"[QR Teku] Cargador (móvil LAN): {loader_url_lan}\n")
+    print(f"\n[PULSO] Supervisor: {url}")
+    print(f"[PULSO] Cargador (móvil LAN): {loader_url_lan}\n")
 
     window = webview.create_window(
-        title="QR Teku · Garvasa",
+        title="PULSO · Garvasa",
         url=url,
         js_api=api,
         width=1440,

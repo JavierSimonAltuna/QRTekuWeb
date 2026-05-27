@@ -15,6 +15,7 @@ import json
 import platform
 import subprocess
 import shutil
+from collections import deque
 from pathlib import Path
 from datetime import datetime
 
@@ -25,7 +26,9 @@ import qrcode
 ODBC_DSN = "INFOLOG"
 ODBC_UID = "infolog"
 ODBC_PWD = "infolog"
-TABLE_NAME = "FGE50STO.GEZCAM"
+TABLE_NAME   = "FGE50STO.GEZCAM"
+TABLE_GECLI2  = "FGE50STO.GECLI2"
+TABLE_GESUPE6 = "FGE50STO.GESUPE6"
 
 TABLE_CHF_PATH = r"C:\Users\QrCarga\TABLA CHF.xlsx"
 
@@ -55,7 +58,39 @@ SAVE_DIR = _resolve_save_dir()
 
 # Caché ODBC en memoria + tabla CHF Excel (fallback)
 _odbc_cache: dict[str, tuple[str, str]] = {}
+_client_cache: dict[str, tuple[str, str]] = {}
+_touliv1_cache: dict[str, "int | None"] = {}
 _df_chf_cache: pd.DataFrame | None = None
+
+# Log de diagnóstico ODBC (últimas 100 operaciones)
+_odbc_log: deque = deque(maxlen=100)
+
+
+def _log_odbc(op: str, key: str, status: str, value=None, error: str = ""):
+    _odbc_log.appendleft({
+        "ts": datetime.now().strftime("%H:%M:%S"),
+        "op": op,
+        "key": key,
+        "status": status,
+        "value": str(value) if value is not None else "",
+        "error": error,
+    })
+
+
+def get_odbc_log() -> list:
+    return list(_odbc_log)
+
+
+def clear_touliv1_cache() -> None:
+    """Limpia la caché de TOULIV1 para forzar re-consulta (solo al cargar archivo nuevo)."""
+    _touliv1_cache.clear()
+
+
+def clear_chf_caches() -> None:
+    """Limpia las cachés de CIF/agencia para reflejar cambios en AS400 o en Excel.
+    Seguro en auto-reload porque solo hay pocos vehículos únicos por fichero."""
+    _odbc_cache.clear()
+    _client_cache.clear()
 
 
 # ─── Utilidades ─────────────────────────────────────────────────────────
@@ -195,6 +230,29 @@ def _load_chf_table() -> pd.DataFrame:
 
 
 # ─── Excel ──────────────────────────────────────────────────────────────
+def _is_green_fill(cell) -> bool:
+    """Devuelve True si la celda tiene fondo verde sólido (Excel color fill)."""
+    try:
+        fill = cell.fill
+        if fill is None or fill.fill_type not in ("solid",):
+            return False
+        fg = fill.fgColor
+        if fg is None or fg.type != "rgb":
+            return False
+        rgb_str = str(fg.rgb)
+        if len(rgb_str) == 8:
+            r = int(rgb_str[2:4], 16); g = int(rgb_str[4:6], 16); b = int(rgb_str[6:8], 16)
+        elif len(rgb_str) == 6:
+            r = int(rgb_str[0:2], 16); g = int(rgb_str[2:4], 16); b = int(rgb_str[4:6], 16)
+        else:
+            return False
+        if r == 0 and g == 0 and b == 0:
+            return False
+        return g > 100 and g > r * 1.2 and g > b * 1.2
+    except Exception:
+        return False
+
+
 def load_excel(path: str) -> tuple[list[dict], str]:
     """
     Carga el Excel y devuelve (rows, fecha_b2).
@@ -214,6 +272,44 @@ def load_excel(path: str) -> tuple[list[dict], str]:
         # Fallback: intentar abrir el original directamente
         read_path = path
         tmp_path = None
+
+    # Detectar filas verdes (ya_cargado) mapeando por Nº viaje — inmune a filtros/orden.
+    # Buscamos la fila de cabecera (DESTINO), localizamos la columna Nº,
+    # y recogemos los valores de n_viaje de las filas con celdas D y E verdes.
+    green_n_set: set = set()
+    if not read_path.lower().endswith(".csv") and tmp_path is not None:
+        try:
+            import openpyxl as _opx
+            _wb = _opx.load_workbook(read_path, read_only=False, data_only=True)
+            try:
+                _ws = _wb.active
+                _all_rows = list(_ws.iter_rows())
+                # Localizar fila de cabecera y columna Nº
+                _hdr_ri = None
+                _n_ci = None
+                for _ri, _rcells in enumerate(_all_rows):
+                    _vals = [str(c.value or "").strip().upper() for c in _rcells]
+                    if "DESTINO" in _vals:
+                        _hdr_ri = _ri
+                        for _ci, _v in enumerate(_vals):
+                            if _v in ("Nº", "N°", "NÚM", "NUM", "N") or (_v.startswith("N") and len(_v) <= 3):
+                                _n_ci = _ci
+                                break
+                        break
+                if _hdr_ri is not None:
+                    for _ri, _rcells in enumerate(_all_rows):
+                        if _ri <= _hdr_ri:
+                            continue
+                        if len(_rcells) >= 5 and _is_green_fill(_rcells[3]) and _is_green_fill(_rcells[4]):
+                            if _n_ci is not None and _n_ci < len(_rcells):
+                                _nv = str(_rcells[_n_ci].value or "").strip()
+                                if _nv and _nv.lower() not in ("nan", "none", ""):
+                                    green_n_set.add(_nv)
+            finally:
+                _wb.close()
+                del _wb
+        except Exception:
+            pass
 
     try:
         if read_path.lower().endswith(".csv"):
@@ -395,6 +491,7 @@ def load_excel(path: str) -> tuple[list[dict], str]:
             "cod_centro": cod_centro,
             "precinto": precinto,
             "precintos_data": precintos_data,
+            "ya_cargado": bool(n and n in green_n_set),
             "estado": "ready" if destino else "missing-cif",
         })
 
@@ -476,6 +573,122 @@ def odbc_lookup_chf(matricula: str) -> tuple[str, str]:
 
     _odbc_cache[tractora_norm] = (cif, agencia)
     return cif, agencia
+
+
+def odbc_lookup_client(cod_cli: str) -> tuple[str, str]:
+    """
+    Busca CIF + Agencia por CODCLI en FGE50STO.GECLI2.
+    Devuelve (CIF, Agencia). Cachea resultados en _client_cache.
+    """
+    key = _to_codcli_key(cod_cli)
+    if not key or key == "00000000":
+        return "", ""
+    if key in _client_cache:
+        return _client_cache[key]
+    cif, agencia = "", ""
+    try:
+        import pyodbc
+        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=5)
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT NIFCLI, NOMCLI FROM {TABLE_GECLI2} WHERE CODCLI = ? FETCH FIRST 1 ROWS ONLY",
+            key,
+        )
+        row = cur.fetchone()
+        if row:
+            cif = str(row[0] or "").strip()
+            agencia = str(row[1] or "").strip()
+        cur.close()
+        conn.close()
+    except Exception:
+        pass
+    _client_cache[key] = (cif, agencia)
+    return cif, agencia
+
+
+def _to_codcli_key(cod_cli) -> str:
+    """
+    Convierte cod_centro a clave de 8 dígitos para CODCLI en AS400.
+    AS400 CODCLI es campo NUMÉRICO — solo acepta dígitos.
+    Ejemplos: "34" → "00000034", "34.0" → "00000034", "0034" → "00000034".
+    Devuelve "" si el valor no es convertible a entero.
+    """
+    s = str(cod_cli).strip()
+    # Pandas representa enteros como float: "34.0" → limpiar ".0"
+    if "." in s:
+        try:
+            s = str(int(float(s)))
+        except (ValueError, TypeError):
+            return ""
+    s = s.zfill(8)
+    # Rechazar claves con caracteres no numéricos (e.g. "nan", "None")
+    if not s.isdigit():
+        return ""
+    return s
+
+
+def odbc_lookup_touliv1(cod_cli: str) -> "int | None":
+    """
+    Busca TOULIV1 en FGE50STO.GECLI2 por CODCLI.
+    Devuelve el int o None si no se encuentra. Cachea resultados.
+    """
+    key = _to_codcli_key(cod_cli)
+    if not key or key == "00000000":
+        return None
+    if key in _touliv1_cache:
+        cached = _touliv1_cache[key]
+        _log_odbc("TOULIV1", key, "CACHE", cached)
+        return cached
+    result = None
+    try:
+        import pyodbc
+        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=5)
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT TOULIV1 FROM {TABLE_GECLI2} WHERE CODCLI = ? AND CODACT = 101 FETCH FIRST 1 ROWS ONLY",
+            key,
+        )
+        row = cur.fetchone()
+        if row and row[0] is not None:
+            try:
+                result = int(row[0])
+            except (ValueError, TypeError):
+                result = None
+        cur.close()
+        conn.close()
+        if result is not None:
+            _log_odbc("TOULIV1", key, "OK", result)
+        else:
+            _log_odbc("TOULIV1", key, "NOT_FOUND")
+    except Exception as e:
+        _log_odbc("TOULIV1", key, "ERROR", error=str(e))
+    _touliv1_cache[key] = result
+    return result
+
+
+def odbc_count_gesupe6(ruta_carga: int) -> int:
+    """
+    Cuenta pales supervisados para una ruta: COUNT(*) en GESUPE6
+    WHERE TOULIV=ruta_carga AND ETASUP=30. Sin caché (tiempo real).
+    """
+    key = str(ruta_carga)
+    try:
+        import pyodbc
+        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=5)
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT COUNT(*) FROM {TABLE_GESUPE6} WHERE TOULIV = ? AND ETASUP = 30",
+            int(ruta_carga),
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        count = int(row[0]) if row else 0
+        _log_odbc("GESUPE6", key, "OK", count)
+        return count
+    except Exception as e:
+        _log_odbc("GESUPE6", key, "ERROR", error=str(e))
+        return 0
 
 
 # ─── QR ─────────────────────────────────────────────────────────────────
@@ -877,3 +1090,4 @@ def print_file(path: Path | str) -> None:
         subprocess.Popen(["lpr", p])
     else:
         raise RuntimeError("Impresión automática no disponible en este sistema.")
+

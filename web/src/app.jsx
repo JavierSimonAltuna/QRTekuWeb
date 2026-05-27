@@ -46,30 +46,50 @@ const QRTekuApp = () => {
   }, []);
 
   // ── PyWebView detection ────────────────────────────────────────
+  // Polling fallback: pywebviewready puede disparar antes de que React monte,
+  // o la inyección del bridge tarda un instante. Reintentamos cada 400ms hasta 8s.
   useEffect(() => {
-    const check = () => setConnected(!!(window.pywebview && window.pywebview.api));
-    check();
-    window.addEventListener("pywebviewready", check);
-    return () => window.removeEventListener("pywebviewready", check);
+    const tryConnect = () => {
+      if (window.pywebview && window.pywebview.api) {
+        setConnected(true);
+        return true;
+      }
+      return false;
+    };
+    if (tryConnect()) return;
+    const onReady = () => tryConnect();
+    window.addEventListener("pywebviewready", onReady);
+    let attempts = 0;
+    const poll = setInterval(() => {
+      if (tryConnect() || ++attempts >= 20) clearInterval(poll);
+    }, 400);
+    return () => {
+      window.removeEventListener("pywebviewready", onReady);
+      clearInterval(poll);
+    };
   }, []);
 
   // ── Auto-refresh para detectar cambios en el Excel (HORA ACULE) ─────────
+  // Usa setTimeout recursivo para evitar solapamiento si reload tarda >5s.
   useEffect(() => {
     if (!connected || !tw.autoRefresh || !fileInfo) return;
-    const interval = setInterval(async () => {
+    let alive = true;
+    let tid = null;
+    const tick = async () => {
       try {
         const res = await window.pywebview.api.reload_excel();
-        if (res && res.ok) {
+        if (alive && res && res.ok) {
           setRows((prevRows) => {
-            // Mantener "done" local pero actualizar aculado y datos desde Excel
             const doneSet = new Set(prevRows.filter((r) => r.estado === "done").map((r) => r.n));
             return res.rows.map((r) => doneSet.has(r.n) ? { ...r, estado: "done" } : r);
           });
           if (res.auto_enqueued > 0) pushToast(`${res.auto_enqueued} carga(s) añadidas a la cola Bleecker`, "success");
         }
       } catch (e) { /* silencio */ }
-    }, 20000);
-    return () => clearInterval(interval);
+      if (alive) tid = setTimeout(tick, 5000);
+    };
+    tid = setTimeout(tick, 5000);
+    return () => { alive = false; clearTimeout(tid); };
   }, [connected, tw.autoRefresh, fileInfo]);
 
   // ── Polling contadores de cola (badge en la pestaña) ───────────────────
@@ -82,7 +102,7 @@ const QRTekuApp = () => {
       } catch (_) { /* silencio */ }
     };
     tick();
-    const t = setInterval(tick, 8000);
+    const t = setInterval(tick, 5000);
     return () => { alive = false; clearInterval(t); };
   }, []);
 
@@ -136,7 +156,7 @@ const QRTekuApp = () => {
 
   // ── Selection + ODBC lookup ────────────────────────────────────
   const lookupCifAgencia = useCallback(async (idx, row) => {
-    if (!connected) return;
+    if (!apiReady()) return;
     const matricula = (row.matriculas || "").split("/")[0]?.trim();
     if (!matricula) return;
     setLoadingOdbc(true);
@@ -156,7 +176,7 @@ const QRTekuApp = () => {
       setLoadingOdbc(false);
       pushToast(`ODBC error: ${err.message || err}`, "error");
     }
-  }, [connected, pushToast]);
+  }, [pushToast]);
 
   const selectRow = useCallback((idx) => {
     if (idx === selectedIdx) { setSelectedIdx(null); return; }
@@ -205,28 +225,56 @@ const QRTekuApp = () => {
   // Meta para el Word (no va en el QR)
   const buildMeta = (state) => ({ playa: state.PL || "", muelle: state.MU || "" });
 
+  // Comprueba el bridge directamente en el momento de la llamada (no React state)
+  const apiReady = () => !!(window.pywebview && window.pywebview.api);
+
   const handleImport = async () => {
-    if (!connected) {
-      pushToast("Función disponible solo dentro de QRTeku.exe", "info");
-      return;
-    }
-    try {
-      const path = await window.pywebview.api.pick_excel();
-      if (!path) return;
-      const res = await window.pywebview.api.load_excel(path);
-      if (!res.ok) { pushToast(`Error: ${res.error}`, "error"); return; }
-      setRows(res.rows);
-      setFileInfo({ name: res.filename, count: res.count, fecha: res.fecha_b2, path });
-      setSelectedIdx(null);
-      setEditing({});
-      pushToast(`${res.count} filas cargadas desde ${res.filename}`, "success");
-    } catch (e) {
-      pushToast(`Error: ${e.message || e}`, "error");
+    if (apiReady()) {
+      // Ventana PyWebView: diálogo nativo de archivo
+      try {
+        const path = await window.pywebview.api.pick_excel();
+        if (!path) return;
+        const res = await window.pywebview.api.load_excel(path);
+        if (!res.ok) { pushToast(`Error: ${res.error}`, "error"); return; }
+        setRows(res.rows);
+        setFileInfo({ name: res.filename, count: res.count, fecha: res.fecha_b2, path });
+        setSelectedIdx(null);
+        setEditing({});
+        pushToast(`${res.count} filas cargadas desde ${res.filename}`, "success");
+      } catch (e) {
+        pushToast(`Error: ${e.message || e}`, "error");
+      }
+    } else {
+      // Navegador: input file HTML → envía base64 al servidor HTTP
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".xlsx,.xls,.csv";
+      input.onchange = async () => {
+        const file = input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+          try {
+            const b64 = ev.target.result.split(",")[1];
+            const res = await window.api.call("load_excel_base64", file.name, b64);
+            if (!res.ok) { pushToast(`Error: ${res.error}`, "error"); return; }
+            setRows(res.rows);
+            setFileInfo({ name: res.filename, count: res.count, fecha: res.fecha_b2, path: file.name });
+            setSelectedIdx(null);
+            setEditing({});
+            pushToast(`${res.count} filas cargadas desde ${res.filename}`, "success");
+          } catch (e) {
+            pushToast(`Error: ${e.message || e}`, "error");
+          }
+        };
+        reader.readAsDataURL(file);
+      };
+      input.click();
     }
   };
 
   const handleReload = async () => {
-    if (!connected) return;
+    if (!apiReady()) return;
     const res = await window.pywebview.api.reload_excel();
     if (res.ok) {
       setRows(res.rows);
@@ -251,7 +299,7 @@ const QRTekuApp = () => {
     const meta = buildMeta(state);
     const precintos = state.precintos.map((p) => ({ centro: p.centro, precinto: p.code }));
 
-    if (connected) {
+    if (apiReady()) {
       try {
         const res = await window.pywebview.api.generate_word_and_print(payload, r.destino, precintos, true, meta);
         if (!res.ok) { pushToast(`Error: ${res.error}`, "error"); return; }
@@ -270,7 +318,7 @@ const QRTekuApp = () => {
   const copyJSON = (idx) => {
     const compact = JSON.stringify(buildPayload(editing[idx]));
     if (navigator.clipboard) navigator.clipboard.writeText(compact);
-    else if (connected) window.pywebview.api.copy_to_clipboard(compact);
+    else if (apiReady()) window.pywebview.api.copy_to_clipboard(compact);
     pushToast("JSON copiado al portapapeles", "success");
   };
 
@@ -327,12 +375,24 @@ const QRTekuApp = () => {
       {/* ─── Dark top bar (estilo Variant C) ───────────────────── */}
       <header style={S.top}>
         <div style={S.brandRow}>
-          <div style={S.logoMark}>
-            <span style={S.logoG}>G</span>
+          <img
+            src="assets/icon-rojo.png"
+            alt="PULSO"
+            style={{ width: 34, height: 34, borderRadius: 8, flexShrink: 0 }}
+            onError={(e) => {
+              e.target.src = "assets/pulso-icon.svg";
+              e.target.onerror = () => {
+                e.target.style.display = "none";
+                e.target.nextElementSibling.style.display = "flex";
+              };
+            }}
+          />
+          <div style={{ ...S.logoMark, display: "none" }}>
+            <span style={S.logoG}>P</span>
             <span style={S.logoBar} />
           </div>
           <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: "#fafaf9", letterSpacing: -0.3 }}>QR Teku</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "#fafaf9", letterSpacing: -0.3 }}>PULSO</span>
             <span style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", letterSpacing: 0.3 }}>Garvasa · v3.2</span>
           </div>
           {hasFile && (
@@ -533,11 +593,11 @@ const QRTekuApp = () => {
       </div>
 
       {/* Tweaks */}
-      <TweaksPanel title="Tweaks · QR Teku">
+      <TweaksPanel title="Tweaks · PULSO">
         <TweakSection label="Vista">
           <TweakToggle label="Tabla compacta"   value={tw.denseTable}     onChange={(v) => setTweak("denseTable", v)} />
           <TweakToggle label="Mostrar JSON"     value={tw.showJsonPanel}  onChange={(v) => setTweak("showJsonPanel", v)} />
-          <TweakToggle label="Auto-recargar Excel (20s)" value={tw.autoRefresh}    onChange={(v) => setTweak("autoRefresh", v)} />
+          <TweakToggle label="Auto-recargar Excel (5s)"  value={tw.autoRefresh}    onChange={(v) => setTweak("autoRefresh", v)} />
         </TweakSection>
       </TweaksPanel>
     </div>
@@ -556,7 +616,7 @@ const EmptyState = ({ onImport, connected }) => (
       <h2 style={S.emptyH}>Importa un Excel para empezar</h2>
       <p style={S.emptyP}>
         Carga el archivo de cargas del día (.xlsx, .xls o .csv).<br/>
-        QR Teku detecta automáticamente el destino, matrículas, expediciones y precintos,
+        PULSO detecta automáticamente el destino, matrículas, expediciones y precintos,
         y consulta el CIF + Agencia en {connected ? <b>FGE50STO.GEZCAM</b> : <span style={{ color: "#a8a29e" }}>(modo demo)</span>}.
       </p>
       <button onClick={onImport} style={S.emptyBtn}>

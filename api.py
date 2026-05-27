@@ -32,6 +32,7 @@ class Api:
         self._last_payload: dict = {}
         self._last_destino: str = ""
         self._last_precintos: list = []
+        self._picker_open: bool = False
 
     def set_window(self, window):
         self._window = window
@@ -40,15 +41,33 @@ class Api:
     # Excel: diálogos y carga
     # ──────────────────────────────────────────────────────────────
     def pick_excel(self) -> str:
-        """Abre un diálogo nativo para escoger un Excel. Devuelve la ruta o ''."""
-        if not self._window:
-            return ""
-        result = self._window.create_file_dialog(
-            webview.OPEN_DIALOG,
-            allow_multiple=False,
-            file_types=("Excel files (*.xlsx;*.xls)", "CSV files (*.csv)", "All files (*.*)"),
-        )
-        return result[0] if result else ""
+        """Abre un diálogo nativo para escoger un Excel. Devuelve la ruta o ''.
+        Usa tkinter en lugar de webview.OPEN_DIALOG para evitar el error
+        'Este archivo está en uso' cuando el Excel está abierto en Excel."""
+        self._picker_open = True
+        try:
+            import tkinter as _tk
+            from tkinter import filedialog as _fd
+            root = _tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            path = _fd.askopenfilename(
+                parent=root,
+                title="Seleccionar Plan de Carga",
+                filetypes=[
+                    ("Excel / CSV", "*.xlsx *.xls *.csv"),
+                    ("Excel 2007+", "*.xlsx"),
+                    ("Excel 97-2003", "*.xls"),
+                    ("CSV", "*.csv"),
+                    ("Todos los archivos", "*.*"),
+                ],
+            )
+            root.destroy()
+            if path:
+                core.clear_touliv1_cache()
+            return path or ""
+        finally:
+            self._picker_open = False
 
     def load_excel(self, path: str) -> dict:
         """
@@ -71,17 +90,64 @@ class Api:
             added = 0
             try:
                 for r in rows:
-                    if r.get("aculado") and not r.get("cif"):
-                        matricula = (r.get("matriculas") or "").split("/")[0].strip()
-                        if matricula:
-                            try:
-                                cif, agencia = core.odbc_lookup_chf(matricula)
-                                r["cif"] = cif or ""
-                                r["agencia"] = agencia or r.get("agencia", "")
-                            except Exception:
-                                pass
-                    # Añadimos fecha a todas para construir bien el QR
+                    # Ya cargado: ocultar de vista y excluir de cola
+                    if r.get("ya_cargado"):
+                        r["estado"] = "done"
+                    # Enriquecer aculados activos
+                    if r.get("aculado") and not r.get("ya_cargado"):
+                        if not r.get("cif"):
+                            matricula = (r.get("matriculas") or "").split("/")[0].strip()
+                            if matricula:
+                                try:
+                                    cif, agencia = core.odbc_lookup_chf(matricula)
+                                    r["cif"] = cif or ""
+                                    r["agencia"] = agencia or r.get("agencia", "")
+                                except Exception:
+                                    pass
+                        # GESUPE6: buscar TOULIV1 en GECLI2 por CODCLI → contar pales
+                        try:
+                            cod_centro = r.get("cod_centro", "")
+                            if cod_centro:
+                                # Lookup correcto: CODCLI → TOULIV1 en GECLI2
+                                touliv1 = core.odbc_lookup_touliv1(cod_centro)
+                                if touliv1 is None:
+                                    # Fallback: intentar cod_centro como valor numérico directo
+                                    try:
+                                        touliv1 = int(float(cod_centro))
+                                    except (ValueError, TypeError):
+                                        touliv1 = None
+                                if touliv1 is not None:
+                                    ruta_carga = int(touliv1) - 5
+                                    numsup = core.odbc_count_gesupe6(ruta_carga)
+                                    r["numsup_count"] = numsup
+                                    r["touliv1"] = touliv1
+                                    r["ruta_carga"] = ruta_carga
+                        except Exception:
+                            r["numsup_count"] = 0
+                    # Fecha para QR
                     r["fecha"] = fecha_b2
+
+                # Viajes combinados: sumar numsup_count por viaje_n
+                from collections import defaultdict
+                viaje_counts: dict = defaultdict(int)
+                viaje_rows: dict = defaultdict(list)
+                for r in rows:
+                    if r.get("aculado") and not r.get("ya_cargado"):
+                        n = r.get("n", "")
+                        if n:
+                            viaje_counts[n] += r.get("numsup_count", 0)
+                            viaje_rows[n].append(r)
+                for n, group in viaje_rows.items():
+                    combined = viaje_counts[n]
+                    ok = combined > 25
+                    is_combined = len(group) > 1
+                    trip_destinos = [g.get("destino", "") for g in group]
+                    for g in group:
+                        g["combined_count"] = combined
+                        g["mercancia_ok"] = ok
+                        g["is_combined"] = is_combined
+                        g["trip_destinos"] = trip_destinos
+
                 added = queue_manager.get_manager().auto_enqueue_from_rows(rows)
             except Exception:
                 pass
@@ -96,9 +162,29 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e), "trace": traceback.format_exc()}
 
+    def load_excel_base64(self, filename: str, b64_content: str) -> dict:
+        """Carga un Excel desde contenido base64 (fallback para navegador sin pywebview)."""
+        import base64 as _b64, tempfile, os as _os
+        try:
+            data = _b64.b64decode(b64_content)
+            suffix = _os.path.splitext(filename)[1] or ".xlsx"
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+                f.write(data)
+                tmp_path = f.name
+            try:
+                return self.load_excel(tmp_path)
+            finally:
+                try: _os.unlink(tmp_path)
+                except: pass
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def reload_excel(self) -> dict:
         if not self._last_excel_path:
             return {"ok": False, "error": "No hay archivo previo cargado."}
+        if self._picker_open:
+            return {"ok": False, "error": "picker_open"}
+        core.clear_chf_caches()   # CIF/agencia siempre frescos; TOULIV1 permanece cacheado
         return self.load_excel(self._last_excel_path)
 
     # ──────────────────────────────────────────────────────────────
@@ -210,7 +296,7 @@ class Api:
     def app_info(self) -> dict:
         return {
             "version": "3.0",
-            "name": "QR Teku",
+            "name": "PULSO",
             "company": "Garvasa",
             "platform": os.name,
         }
@@ -266,9 +352,58 @@ class Api:
             return {"ok": False, "error": str(e)}
 
     def queue_reset_queued(self) -> dict:
-        """Borra todos los items pendientes (queued) para poder recargar el Excel."""
+        """Borra todos los items pendientes (queued y pending_merch) para poder recargar el Excel."""
         try:
             return queue_manager.get_manager().reset_queued()
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def queue_force_queued(self, item_id: str) -> dict:
+        """Fuerza un item pending_merch a la cola como urgente."""
+        try:
+            return queue_manager.get_manager().force_queued(item_id)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def queue_set_comment(self, item_id: str, comment: str) -> dict:
+        """Guarda el comentario del supervisor para un item de la cola."""
+        try:
+            return queue_manager.get_manager().set_comment(item_id, str(comment or ""))
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def queue_send_to_pending_merch(self, item_id: str) -> dict:
+        """Mueve un item de la cola a Sin mercancía."""
+        try:
+            return queue_manager.get_manager().send_to_pending_merch(item_id)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def queue_update_ruta(self, item_id: str, ruta_carga: str) -> dict:
+        """Recalcula numsup con una ruta manual y actualiza el item de la cola."""
+        try:
+            ruta = int(str(ruta_carga).strip())
+            numsup = core.odbc_count_gesupe6(ruta)
+            mercancia_ok = numsup > 25
+            return queue_manager.get_manager().update_ruta_carga(item_id, ruta, numsup, mercancia_ok)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def lookup_client(self, cod_cli: str) -> dict:
+        """Busca CIF + Nombre en GECLI2 por CODCLI."""
+        try:
+            cif, nombre = core.odbc_lookup_client(cod_cli or "")
+            return {"ok": True, "cif": cif, "nombre": nombre, "found": bool(cif)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def lookup_gesupe6(self, touliv1_str: str) -> dict:
+        """Cuenta pales supervisados (GESUPE6) para una ruta."""
+        try:
+            touliv1 = int(float(str(touliv1_str).strip()))
+            ruta_carga = touliv1 - 5
+            count = core.odbc_count_gesupe6(ruta_carga)
+            return {"ok": True, "count": count, "ruta_carga": ruta_carga}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
@@ -333,3 +468,10 @@ class Api:
             return mgr.upsert_loader({"id": loader_id, "muelle_actual": str(muelle)})
         except Exception as e:
             return {"ok": False, "error": str(e)}
+
+    def get_odbc_diagnostics(self) -> dict:
+        """Devuelve el log de operaciones ODBC recientes para diagnóstico."""
+        try:
+            return {"ok": True, "log": core.get_odbc_log()}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "log": []}

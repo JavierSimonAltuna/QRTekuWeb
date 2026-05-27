@@ -117,26 +117,75 @@ class QueueManager:
     # ────────────────────────────────────────────────────────────
     def auto_enqueue_from_rows(self, rows: list[dict]) -> int:
         """
-        Para cada fila con aculado=True que no esté ya en cola (queued|assigned),
-        genera el QR y la añade a la cola. Devuelve nº de nuevas entradas.
+        Para cada fila aculada activa (no ya_cargado) que no esté en cola,
+        genera el QR y la añade. Si ya está en pending_merch, actualiza counts
+        y promueve a queued si mercancia_ok. Devuelve nº de nuevas/promovidas.
+        Los viajes combinados (is_combined=True, mismo viaje_n) se fusionan en
+        UN SOLO item de cola; precintos_data ya contiene todos los centros.
         """
         with self._lock:
             added = 0
-            # claves ya presentes (viaje_n + destino) para no duplicar
-            present_keys = {
-                (it["viaje_n"], it["destino"])
+            changed = False
+            active_statuses = ("queued", "assigned", "pending_merch")
+            # Presencia de viajes simples: clave (viaje_n, destino)
+            present_single: dict = {
+                (it["viaje_n"], it["destino"]): it
                 for it in self._items
-                if it["status"] in ("queued", "assigned")
+                if it["status"] in active_statuses and not it.get("is_combined")
             }
+            # Presencia de viajes combinados: clave viaje_n (uno por viaje)
+            present_combined: dict = {
+                it["viaje_n"]: it
+                for it in self._items
+                if it["status"] in active_statuses and it.get("is_combined")
+            }
+            # Combinados añadidos en esta llamada (para deduplicar dentro del mismo lote)
+            combined_seen: set = set()
+
             for r in rows:
-                if not r.get("aculado"):
+                if not r.get("aculado") or r.get("ya_cargado"):
                     continue
-                key = (r.get("n", ""), r.get("destino", ""))
-                if not key[0] or key in present_keys:
+                n = r.get("n", "")
+                if not n:
                     continue
+                is_combined = bool(r.get("is_combined", False))
+
+                if is_combined:
+                    # Viaje combinado: un solo item por viaje_n
+                    if n in present_combined:
+                        existing = present_combined[n]
+                        if existing["status"] == "pending_merch":
+                            new_ok = bool(r.get("mercancia_ok", False))
+                            existing["combined_count"] = r.get("combined_count")
+                            existing["numsup_count"] = r.get("numsup_count")
+                            existing["mercancia_ok"] = new_ok
+                            if new_ok:
+                                existing["status"] = "queued"
+                                changed = True
+                                added += 1
+                        continue
+                    if n in combined_seen:
+                        continue  # ya añadido en este lote
+                    combined_seen.add(n)
+                else:
+                    # Viaje simple: clave (viaje_n, destino)
+                    key = (n, r.get("destino", ""))
+                    if key in present_single:
+                        existing = present_single[key]
+                        if existing["status"] == "pending_merch":
+                            new_ok = bool(r.get("mercancia_ok", False))
+                            existing["combined_count"] = r.get("combined_count")
+                            existing["numsup_count"] = r.get("numsup_count")
+                            existing["mercancia_ok"] = new_ok
+                            if new_ok:
+                                existing["status"] = "queued"
+                                changed = True
+                                added += 1
+                        continue
+
                 self._items.append(self._build_item(r, urgente=False, source="auto"))
                 added += 1
-            if added:
+            if added or changed:
                 self._save()
             return added
 
@@ -144,8 +193,13 @@ class QueueManager:
         """Encolar manualmente desde la app supervisor (botón explícito)."""
         with self._lock:
             # Si ya está en cola, marcar urgente si procede y devolver
+            is_combined = bool(row.get("is_combined", False))
             for it in self._items:
-                if it["viaje_n"] == row.get("n") and it["destino"] == row.get("destino") and it["status"] in ("queued", "assigned"):
+                already = (
+                    it["viaje_n"] == row.get("n") and it["status"] in ("queued", "assigned")
+                    and (is_combined or it["destino"] == row.get("destino"))
+                )
+                if already:
                     if urgente and not it["urgente"]:
                         it["urgente"] = True
                         self._save()
@@ -185,6 +239,9 @@ class QueueManager:
         # Hora de salida: usamos expedicion si parece una hora, si no, derivamos de hora_acule+30min
         hora_salida = self._derive_salida(row)
 
+        mercancia_ok = bool(row.get("mercancia_ok", True))
+        initial_status = "queued" if mercancia_ok else "pending_merch"
+
         return {
             "id": self._new_ticket(),
             "viaje_n": row.get("n", ""),
@@ -206,7 +263,7 @@ class QueueManager:
             "qr_png_b64": qr_b64,
             "qr_payload_compact": compact,
             "urgente": bool(urgente),
-            "status": "queued",
+            "status": initial_status,
             "assigned_to": None,
             "assigned_at": None,
             "queued_at": datetime.now().isoformat(timespec="seconds"),
@@ -214,6 +271,14 @@ class QueueManager:
             "source": source,
             "completed_muelle": None,
             "completed_at": None,
+            "mercancia_ok": mercancia_ok,
+            "combined_count": row.get("combined_count"),
+            "numsup_count": row.get("numsup_count"),
+            "is_combined": bool(row.get("is_combined", False)),
+            "trip_destinos": row.get("trip_destinos", []),
+            "touliv1": row.get("touliv1"),
+            "ruta_carga": row.get("ruta_carga"),
+            "comment": "",
         }
 
     @staticmethod
@@ -234,6 +299,32 @@ class QueueManager:
             except Exception:
                 pass
         return ""
+
+    @staticmethod
+    def _minutes_to_departure(hora_salida: str) -> float:
+        """Minutos hasta la hora de salida desde ahora. Inf si no hay hora válida.
+        Si la hora ya pasó (más de 5 min), se asume que es del día siguiente."""
+        try:
+            parts = str(hora_salida).strip().split(":")
+            h, m = int(parts[0]), int(parts[1])
+            now = datetime.now()
+            dep = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            diff = (dep - now).total_seconds() / 60
+            if diff < -5:
+                dep = dep.replace(day=dep.day + 1)
+                diff = (dep - now).total_seconds() / 60
+            return diff
+        except Exception:
+            return float("inf")
+
+    def _promote_urgent_pending(self):
+        """Promueve a urgente los items pending_merch con salida en ≤45 min."""
+        for it in self._items:
+            if it["status"] == "pending_merch":
+                mins = self._minutes_to_departure(it.get("hora_salida", ""))
+                if mins <= 45:
+                    it["status"] = "queued"
+                    it["urgente"] = True
 
     # ────────────────────────────────────────────────────────────
     # Algoritmo: siguiente carga para un cargador
@@ -308,6 +399,16 @@ class QueueManager:
                     return {"ok": True, "item": it}
             return {"ok": False, "error": "No encontrado"}
 
+    def set_comment(self, item_id: str, comment: str) -> dict:
+        """Guarda el comentario del supervisor en un item (visible al cargador)."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id:
+                    it["comment"] = str(comment or "").strip()
+                    self._save()
+                    return {"ok": True}
+            return {"ok": False, "error": "No encontrado"}
+
     def set_urgent(self, item_id: str, urgente: bool) -> dict:
         with self._lock:
             for it in self._items:
@@ -317,28 +418,68 @@ class QueueManager:
                     return {"ok": True}
             return {"ok": False, "error": "No encontrado"}
 
+    def force_queued(self, item_id: str) -> dict:
+        """Fuerza un item pending_merch a la cola como urgente."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id and it["status"] == "pending_merch":
+                    it["status"] = "queued"
+                    it["urgente"] = True
+                    self._save()
+                    return {"ok": True}
+            return {"ok": False, "error": "No encontrado o no en pending_merch"}
+
+    def send_to_pending_merch(self, item_id: str) -> dict:
+        """Mueve un item de la cola (queued) a Sin mercancía (pending_merch)."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id and it["status"] in ("queued",):
+                    it["status"] = "pending_merch"
+                    it["mercancia_ok"] = False
+                    self._save()
+                    return {"ok": True}
+            return {"ok": False, "error": "No encontrado o no está en cola"}
+
+    def update_ruta_carga(self, item_id: str, ruta_carga: int, numsup_count: int, mercancia_ok: bool) -> dict:
+        """Actualiza ruta_carga y numsup_count de un item (corrección manual de ruta)."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id:
+                    it["ruta_carga"] = ruta_carga
+                    it["numsup_count"] = numsup_count
+                    it["mercancia_ok"] = mercancia_ok
+                    if it["status"] == "pending_merch" and mercancia_ok:
+                        it["status"] = "queued"
+                    self._save()
+                    return {"ok": True, "item": it, "numsup_count": numsup_count}
+            return {"ok": False, "error": "No encontrado"}
+
     # ────────────────────────────────────────────────────────────
     # Lecturas
     # ────────────────────────────────────────────────────────────
     def snapshot(self) -> dict:
         with self._lock:
+            self._promote_urgent_pending()
             queued = [it for it in self._items if it["status"] == "queued"]
             assigned = [it for it in self._items if it["status"] == "assigned"]
             done = [it for it in self._items if it["status"] == "done"]
-            # Orden de presentación: igual que algoritmo (sin asignar a cargador concreto)
+            pending_merch = [it for it in self._items if it["status"] == "pending_merch"]
             queued.sort(key=lambda it: (
                 0 if it["urgente"] else 1,
                 self._parse_time(it["hora_salida"]),
             ))
+            pending_merch.sort(key=lambda it: self._parse_time(it.get("hora_salida", "")))
             return {
                 "queued": queued,
                 "assigned": assigned,
-                "done": done[-20:],  # solo últimos 20 hechos
+                "done": done[-20:],
+                "pending_merch": pending_merch,
                 "loaders": self._loaders,
                 "counts": {
                     "queued": len(queued),
                     "assigned": len(assigned),
                     "done": len(done),
+                    "pending_merch": len(pending_merch),
                 },
             }
 
@@ -376,10 +517,10 @@ class QueueManager:
             return {"ok": True}
 
     def reset_queued(self) -> dict:
-        """Borra solo los items en estado 'queued' (pendientes sin asignar)."""
+        """Borra los items pendientes (queued y pending_merch) para recargar el Excel."""
         with self._lock:
-            before = len([it for it in self._items if it["status"] == "queued"])
-            self._items = [it for it in self._items if it["status"] != "queued"]
+            before = len([it for it in self._items if it["status"] in ("queued", "pending_merch")])
+            self._items = [it for it in self._items if it["status"] not in ("queued", "pending_merch")]
             self._save()
             return {"ok": True, "removed": before}
 
