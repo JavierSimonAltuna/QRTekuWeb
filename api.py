@@ -41,19 +41,31 @@ class Api:
     # Excel: diálogos y carga
     # ──────────────────────────────────────────────────────────────
     def pick_excel(self) -> str:
-        """Abre un diálogo nativo para escoger un Excel. Devuelve la ruta o ''."""
-        if not self._window:
-            return ""
+        """Abre un diálogo nativo para escoger un Excel. Devuelve la ruta o ''.
+        Usa tkinter en lugar de webview.OPEN_DIALOG para evitar el error
+        'Este archivo está en uso' cuando el Excel está abierto en Excel."""
         self._picker_open = True
         try:
-            result = self._window.create_file_dialog(
-                webview.OPEN_DIALOG,
-                allow_multiple=False,
-                file_types=("Excel files (*.xlsx;*.xls)", "CSV files (*.csv)", "All files (*.*)"),
+            import tkinter as _tk
+            from tkinter import filedialog as _fd
+            root = _tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            path = _fd.askopenfilename(
+                parent=root,
+                title="Seleccionar Plan de Carga",
+                filetypes=[
+                    ("Excel / CSV", "*.xlsx *.xls *.csv"),
+                    ("Excel 2007+", "*.xlsx"),
+                    ("Excel 97-2003", "*.xls"),
+                    ("CSV", "*.csv"),
+                    ("Todos los archivos", "*.*"),
+                ],
             )
-            if result:
+            root.destroy()
+            if path:
                 core.clear_touliv1_cache()
-            return result[0] if result else ""
+            return path or ""
         finally:
             self._picker_open = False
 
