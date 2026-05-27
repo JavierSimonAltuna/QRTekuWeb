@@ -441,6 +441,16 @@ def load_excel(path: str) -> tuple[list[dict], str]:
                         hora_salida = v
                         break
 
+        # COL W (índice 22) — indica tipo especial: "A" → ruta_carga = TOULIV1+1
+        col_w = ""
+        for col in df.columns:
+            cu = str(col).upper().replace("\r", "").replace("\n", "").replace(" ", "").replace("\t", "")
+            if cu == "W":
+                col_w = _safe_str(r.get(col, "")).strip().upper()
+                break
+        if not col_w and len(df.columns) > 22:
+            col_w = _safe_str(r.iloc[22]).strip().upper()
+
         # COD. CENTRO — columna detectada por cabecera o fallback U (índice 20).
         cod_centro = ""
         if _cod_centro_idx is not None and _cod_centro_idx < len(df.columns):
@@ -489,6 +499,7 @@ def load_excel(path: str) -> tuple[list[dict], str]:
             "hora_acule": hora_acule, "aculado": aculado,
             "hora_salida": hora_salida,
             "cod_centro": cod_centro,
+            "col_w": col_w,
             "precinto": precinto,
             "precintos_data": precintos_data,
             "ya_cargado": bool(n and n in green_n_set),
@@ -1090,4 +1101,3 @@ def print_file(path: Path | str) -> None:
         subprocess.Popen(["lpr", p])
     else:
         raise RuntimeError("Impresión automática no disponible en este sistema.")
-

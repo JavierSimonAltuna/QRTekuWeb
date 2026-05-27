@@ -117,7 +117,10 @@ class Api:
                                     except (ValueError, TypeError):
                                         touliv1 = None
                                 if touliv1 is not None:
-                                    ruta_carga = int(touliv1) - 5
+                                    # Col W = "A" → ruta_carga = TOULIV1 + 1
+                                    # En cualquier otro caso → TOULIV1 - 5
+                                    col_w = str(r.get("col_w", "")).strip().upper()
+                                    ruta_carga = int(touliv1) + 1 if col_w == "A" else int(touliv1) - 5
                                     numsup = core.odbc_count_gesupe6(ruta_carga)
                                     r["numsup_count"] = numsup
                                     r["touliv1"] = touliv1
