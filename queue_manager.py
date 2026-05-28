@@ -62,6 +62,12 @@ class QueueManager:
                 data = json.loads(QUEUE_FILE.read_text(encoding="utf-8"))
                 self._items = data.get("items", [])
                 self._counter = data.get("counter", 0)
+                # Migrar items sin queue_type (creados antes del split ambiente/refrigerado)
+                for it in self._items:
+                    if "queue_type" not in it:
+                        is_refr = it.get("tipo_carga", "AMBIENTE") == "REFRIGERADO"
+                        is_adelantado = bool(it.get("adelantado_tipo"))
+                        it["queue_type"] = "refrigerado" if (is_refr and not is_adelantado) else "ambiente"
             except Exception:
                 self._items = []
                 self._counter = 0

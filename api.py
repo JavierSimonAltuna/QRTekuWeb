@@ -129,6 +129,11 @@ class Api:
                         es_ambiente = tipo_viaje == "ambiente"
                         codact_gecli2 = "101" if es_ambiente else "003"
 
+                        # queue_type solo depende de col_w y tipo_viaje (no de ODBC)
+                        # Adelantados (marca A) siempre van a cola ambiente aunque sean refrigerado
+                        _col_w = str(r.get("col_w", "")).strip().upper()
+                        r["queue_type"] = "refrigerado" if (not es_ambiente and _col_w != "A") else "ambiente"
+
                         if cod_centro:
                             touliv1, catcli = core.odbc_lookup_touliv1(cod_centro, codact=codact_gecli2)
                             r["catcli"] = catcli
@@ -175,9 +180,6 @@ class Api:
                                     r["gallego_urgente"] = False
                             else:
                                 r["gallego_urgente"] = False
-
-                            # Adelantados (marca A) siempre van a cola ambiente aunque sean refrigerado
-                            r["queue_type"] = "refrigerado" if (not es_ambiente and not is_adelantado) else "ambiente"
                     except Exception:
                         r["numsup_count"] = 0
 
