@@ -14,7 +14,6 @@ const QueuePanel = ({ pushToast }) => {
     counts: { queued: 0, queued_refr: 0, assigned: 0, assigned_refr: 0, done: 0, pending_merch: 0, pending_merch_refr: 0, blocked: 0 }
   });
   const [activeTab, setActiveTab] = useState("cola");
-  const [queueView, setQueueView] = useState("ambiente");
   const [reassignFor, setReassignFor] = useState(null);
   const [helperMenuFor, setHelperMenuFor] = useState(null);
   const [search, setSearch] = useState("");
@@ -131,39 +130,33 @@ const QueuePanel = ({ pushToast }) => {
   };
 
   const loaderById = (id) => snap.loaders.find((l) => l.id === id);
+  const pendingMerch      = snap.pending_merch      || [];
+  const pendingMerchRefri = snap.pending_merch_refr || [];
+  const ambLoaders   = snap.loaders.filter(l => (l.queue_type || "ambiente") === "ambiente");
+  const refriLoaders = snap.loaders.filter(l => (l.queue_type || "ambiente") === "refrigerado");
+  const isRefriTab = activeTab === "cola_refri" || activeTab === "sinmerch_refri";
 
-  const isAmbView = queueView === "ambiente";
-  const viewQueued     = isAmbView ? (snap.queued       || []) : (snap.queued_refr       || []);
-  const viewAssigned   = isAmbView ? (snap.assigned     || []) : (snap.assigned_refr     || []);
-  const viewPending    = isAmbView ? (snap.pending_merch|| []) : (snap.pending_merch_refr|| []);
-  const viewLoaders    = snap.loaders.filter(l => (l.queue_type || "ambiente") === queueView);
-  const viewCounts = {
-    queued:       isAmbView ? snap.counts.queued       : (snap.counts.queued_refr       || 0),
-    assigned:     isAmbView ? snap.counts.assigned     : (snap.counts.assigned_refr     || 0),
-    pending_merch:isAmbView ? snap.counts.pending_merch: (snap.counts.pending_merch_refr|| 0),
-  };
-  const pendingMerch = viewPending;
-
-  // Agrupar pending_merch por viaje_n para mostrar combinados juntos
-  const pendingGroups = (() => {
+  const makePendingGroups = (items) => {
     const map = {};
-    for (const it of pendingMerch) {
+    for (const it of items) {
       const k = it.viaje_n || it.id;
       if (!map[k]) map[k] = [];
       map[k].push(it);
     }
     return Object.values(map);
-  })();
+  };
+  const pendingGroups      = makePendingGroups(pendingMerch);
+  const pendingGroupsRefri = makePendingGroups(pendingMerchRefri);
 
   return (
     <div style={QS.root}>
       {/* ─── Header stats + tabs ─── */}
       <div style={QS.stats}>
-        <StatBig label="En cola"     value={viewCounts.queued}      color="#1c1917" />
-        <StatBig label="Asignadas"   value={viewCounts.assigned}    color="#0ea5e9" />
-        <StatBig label="Completadas" value={snap.counts.done}       color="#15803d" />
-        {viewCounts.pending_merch > 0 && (
-          <StatBig label="Sin mercancía" value={viewCounts.pending_merch} color="#d97706" />
+        <StatBig label="En cola"     value={isRefriTab ? (snap.counts.queued_refr||0)       : snap.counts.queued}   color="#1c1917" />
+        <StatBig label="Asignadas"   value={isRefriTab ? (snap.counts.assigned_refr||0)     : snap.counts.assigned} color="#0ea5e9" />
+        <StatBig label="Completadas" value={snap.counts.done} color="#15803d" />
+        {(isRefriTab ? (snap.counts.pending_merch_refr||0) : (snap.counts.pending_merch||0)) > 0 && (
+          <StatBig label="Sin mercancía" value={isRefriTab ? (snap.counts.pending_merch_refr||0) : snap.counts.pending_merch} color="#d97706" />
         )}
         <div style={{ flex: 1 }} />
         <button onClick={refresh} style={QS.refreshBtn} title="Refrescar">
@@ -187,54 +180,50 @@ const QueuePanel = ({ pushToast }) => {
         )}
       </div>
 
-      {/* ─── Toggle Ambiente / Refrigerado ─── */}
-      <div style={QS.viewToggleBar}>
-        <button
-          onClick={() => setQueueView("ambiente")}
-          style={{ ...QS.viewBtn, ...(queueView === "ambiente" ? QS.viewBtnAmbActive : {}) }}
-        >
-          ☼ AMBIENTE
-        </button>
-        <button
-          onClick={() => setQueueView("refrigerado")}
-          style={{ ...QS.viewBtn, ...(queueView === "refrigerado" ? QS.viewBtnRefActive : {}) }}
-        >
-          ❄ REFRIGERADO
-        </button>
-        {queueView === "ambiente" && (snap.counts.queued_refr || 0) > 0 && (
-          <span style={QS.otherCount}>{snap.counts.queued_refr} en cola REFRI</span>
-        )}
-        {queueView === "refrigerado" && snap.counts.queued > 0 && (
-          <span style={QS.otherCount}>{snap.counts.queued} en cola AMB</span>
-        )}
-      </div>
-
       {/* ─── Tabs ─── */}
       <div style={QS.tabBar}>
         <button
           onClick={() => setActiveTab("cola")}
           style={{ ...QS.tab, ...(activeTab === "cola" ? QS.tabActive : {}) }}
         >
-          Cola de cargas
-          {viewCounts.queued > 0 && (
-            <span style={QS.tabBadge}>{viewCounts.queued}</span>
+          ☼ Cola ambiente
+          {snap.counts.queued > 0 && (
+            <span style={QS.tabBadge}>{snap.counts.queued}</span>
           )}
         </button>
         <button
           onClick={() => setActiveTab("sinmerch")}
           style={{ ...QS.tab, ...(activeTab === "sinmerch" ? QS.tabActive : {}), ...(pendingGroups.length > 0 ? { color: "#d97706" } : {}) }}
         >
-          ⚠ Sin mercancía
+          ⚠ Sin merch AMB
           {pendingGroups.length > 0 && (
             <span style={{ ...QS.tabBadge, background: "#fef3c7", color: "#d97706" }}>
               {pendingMerch.length}
             </span>
           )}
         </button>
+        <button
+          onClick={() => setActiveTab("cola_refri")}
+          style={{ ...QS.tab, ...(activeTab === "cola_refri" ? { ...QS.tabActive, borderBottomColor: "#0ea5e9", color: "#0c4a6e" } : {}) }}
+        >
+          ❄ Cola refri
+          {(snap.counts.queued_refr || 0) > 0 && (
+            <span style={{ ...QS.tabBadge, background: "#dbeafe", color: "#0c4a6e" }}>{snap.counts.queued_refr}</span>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab("sinmerch_refri")}
+          style={{ ...QS.tab, ...(activeTab === "sinmerch_refri" ? { ...QS.tabActive, borderBottomColor: "#0ea5e9", color: "#0c4a6e" } : {}), ...(pendingGroupsRefri.length > 0 ? { color: "#d97706" } : {}) }}
+        >
+          ❄ Sin merch REFRI
+          {pendingGroupsRefri.length > 0 && (
+            <span style={{ ...QS.tabBadge, background: "#fef3c7", color: "#d97706" }}>{pendingMerchRefri.length}</span>
+          )}
+        </button>
       </div>
 
-      {/* ─── Buscador (solo en cola) ─── */}
-      {activeTab === "cola" && (
+      {/* ─── Buscador (en tabs de cola) ─── */}
+      {(activeTab === "cola" || activeTab === "cola_refri") && (
         <div style={QS.searchBar}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -259,15 +248,15 @@ const QueuePanel = ({ pushToast }) => {
           <section style={QS.col}>
             <div style={QS.colHead}>
               <span style={QS.colTitle}>Cola</span>
-              <span style={QS.colCount}>{viewQueued.length}</span>
+              <span style={QS.colCount}>{(snap.queued||[]).length}</span>
             </div>
             <div style={QS.list}>
-              {viewQueued.filter(matchesSearch).length === 0 ? (
+              {(snap.queued||[]).filter(matchesSearch).length === 0 ? (
                 <EmptyMini
                   label={search ? "Sin resultados" : "Sin cargas en cola"}
                   hint={search ? `No coincide ningún elemento con "${search}"` : "Se añaden automáticamente cuando se detecta la hora de acule"}
                 />
-              ) : viewQueued.filter(matchesSearch).map((it, i) => (
+              ) : (snap.queued||[]).filter(matchesSearch).map((it, i) => (
                 <QueueCard
                   key={it.id}
                   item={it}
@@ -290,15 +279,15 @@ const QueuePanel = ({ pushToast }) => {
           <section style={QS.col}>
             <div style={QS.colHead}>
               <span style={QS.colTitle}>En curso</span>
-              <span style={QS.colCount}>{viewAssigned.length}</span>
+              <span style={QS.colCount}>{(snap.assigned||[]).length}</span>
             </div>
             <div style={QS.list}>
-              {viewAssigned.filter(matchesSearch).length === 0 ? (
+              {(snap.assigned||[]).filter(matchesSearch).length === 0 ? (
                 <EmptyMini
                   label={search ? "Sin resultados" : "Ninguna carga en curso"}
                   hint={search ? `No coincide ningún elemento con "${search}"` : "Cuando un cargador pida una carga aparecerá aquí"}
                 />
-              ) : viewAssigned.filter(matchesSearch).map((it) => (
+              ) : (snap.assigned||[]).filter(matchesSearch).map((it) => (
                 <AssignedCard
                   key={it.id}
                   item={it}
@@ -322,11 +311,11 @@ const QueuePanel = ({ pushToast }) => {
           <section style={QS.col}>
             <div style={QS.colHead}>
               <span style={QS.colTitle}>Cargadores</span>
-              <span style={QS.colCount}>{viewLoaders.filter((l) => l.active).length}</span>
+              <span style={QS.colCount}>{ambLoaders.filter((l) => l.active).length}</span>
             </div>
             <div style={QS.list}>
-              {viewLoaders.map((l) => {
-                const current = viewAssigned.find((a) => a.assigned_to === l.id || a.helper_id === l.id);
+              {ambLoaders.map((l) => {
+                const current = (snap.assigned||[]).find((a) => a.assigned_to === l.id || a.helper_id === l.id);
                 return (
                   <LoaderCard key={l.id} loader={l} current={current} />
                 );
@@ -423,6 +412,145 @@ const QueuePanel = ({ pushToast }) => {
                     onRemove={() => handleRemove(it.id)}
                     onRefreshNumsup={(ruta) => handleRefreshNumsup(it.id, ruta)}
                   />
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ─── Tab: Cola refrigerado ─── */}
+      {activeTab === "cola_refri" && (
+        <div style={QS.grid}>
+          {/* ── Cola refri ── */}
+          <section style={QS.col}>
+            <div style={QS.colHead}>
+              <span style={QS.colTitle}>❄ Cola</span>
+              <span style={QS.colCount}>{(snap.queued_refr||[]).length}</span>
+            </div>
+            <div style={QS.list}>
+              {(snap.queued_refr||[]).filter(matchesSearch).length === 0 ? (
+                <EmptyMini
+                  label={search ? "Sin resultados" : "Sin cargas refrigeradas en cola"}
+                  hint={search ? `No coincide con "${search}"` : "Se añaden al acularse un camión refrigerado sin marca A"}
+                />
+              ) : (snap.queued_refr||[]).filter(matchesSearch).map((it, i) => (
+                <QueueCard
+                  key={it.id}
+                  item={it}
+                  position={i + 1}
+                  loaders={snap.loaders}
+                  onToggleUrgent={() => handleUrgent(it.id, it.urgente)}
+                  onToggleBlock={() => handleToggleBlock(it.id, it.blocked)}
+                  onRemove={() => handleRemove(it.id)}
+                  onReassign={(loaderId) => handleReassign(it.id, loaderId)}
+                  showReassignMenu={reassignFor === it.id}
+                  onOpenReassign={() => setReassignFor(reassignFor === it.id ? null : it.id)}
+                  onSendToPendingMerch={() => handleSendToPendingMerch(it.id)}
+                  onSetComment={(text) => handleSetComment(it.id, text)}
+                />
+              ))}
+            </div>
+          </section>
+
+          {/* ── En curso refri ── */}
+          <section style={QS.col}>
+            <div style={QS.colHead}>
+              <span style={QS.colTitle}>❄ En curso</span>
+              <span style={QS.colCount}>{(snap.assigned_refr||[]).length}</span>
+            </div>
+            <div style={QS.list}>
+              {(snap.assigned_refr||[]).filter(matchesSearch).length === 0 ? (
+                <EmptyMini
+                  label={search ? "Sin resultados" : "Ninguna carga refrigerada en curso"}
+                  hint={search ? `No coincide con "${search}"` : "Cuando un cargador refri pida una carga aparecerá aquí"}
+                />
+              ) : (snap.assigned_refr||[]).filter(matchesSearch).map((it) => (
+                <AssignedCard
+                  key={it.id}
+                  item={it}
+                  loader={loaderById(it.assigned_to)}
+                  helper={it.helper_id ? loaderById(it.helper_id) : null}
+                  loaders={snap.loaders}
+                  onReassign={(loaderId) => handleReassign(it.id, loaderId)}
+                  onRemove={() => handleRemove(it.id)}
+                  showReassignMenu={reassignFor === it.id}
+                  onOpenReassign={() => setReassignFor(reassignFor === it.id ? null : it.id)}
+                  onAssignHelper={(loaderId) => handleAssignHelper(it.id, loaderId)}
+                  onRemoveHelper={() => handleRemoveHelper(it.id)}
+                  showHelperMenu={helperMenuFor === it.id}
+                  onOpenHelperMenu={() => setHelperMenuFor(helperMenuFor === it.id ? null : it.id)}
+                />
+              ))}
+            </div>
+          </section>
+
+          {/* ── Cargadores refri ── */}
+          <section style={QS.col}>
+            <div style={QS.colHead}>
+              <span style={QS.colTitle}>❄ Cargadores refri</span>
+              <span style={QS.colCount}>{refriLoaders.filter(l => l.active).length}</span>
+            </div>
+            <div style={QS.list}>
+              {refriLoaders.length === 0 ? (
+                <EmptyMini label="Sin cargadores refri" hint="Añade cargadores con queue_type='refrigerado' desde Tweaks" />
+              ) : refriLoaders.map((l) => {
+                const current = (snap.assigned_refr||[]).find(a => a.assigned_to === l.id || a.helper_id === l.id);
+                return <LoaderCard key={l.id} loader={l} current={current} />;
+              })}
+            </div>
+            {snap.done.filter(it => it.queue_type === "refrigerado").length > 0 && (
+              <>
+                <div style={{ ...QS.colHead, marginTop: 18 }}>
+                  <span style={QS.colTitle}>Últimas completadas</span>
+                </div>
+                <div style={QS.list}>
+                  {[...snap.done].reverse().filter(it => it.queue_type === "refrigerado").slice(0, 10).map(it => (
+                    <DoneCard key={it.id} item={it} loader={loaderById(it.assigned_to)} />
+                  ))}
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+      )}
+
+      {/* ─── Tab: Sin mercancía refrigerado ─── */}
+      {activeTab === "sinmerch_refri" && (
+        <div style={QS.sinMerchRoot}>
+          {pendingGroupsRefri.length === 0 ? (
+            <EmptyMini
+              label="Sin camiones refrigerados en espera de mercancía"
+              hint="Todos los camiones refrigerados aculados tienen suficiente mercancía supervisada"
+            />
+          ) : pendingGroupsRefri.map((group) => {
+            const isCombo = group.length > 1 || group[0].is_combined;
+            const combinedCount = group[0].combined_count ?? group.reduce((s, it) => s + (it.numsup_count || 0), 0);
+            const nearDep = group.some((it) => {
+              const hs = it.hora_salida || "";
+              if (!hs.includes(":")) return false;
+              const [h, m] = hs.split(":").map(Number);
+              const now = new Date(); const dep = new Date(now);
+              dep.setHours(h, m, 0, 0);
+              if ((dep - now) < -5 * 60000) dep.setDate(dep.getDate() + 1);
+              return (dep - now) / 60000 >= 0 && (dep - now) / 60000 <= 45;
+            });
+            return (
+              <div key={group[0].viaje_n || group[0].id} style={{ ...QS.pendGroup, borderLeft: nearDep ? "3px solid #d97706" : "3px solid #dbeafe" }}>
+                <div style={QS.pendGroupHead}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    {isCombo && <span style={QS.comboBadge}>COMBINADO</span>}
+                    <span style={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#57534e" }}>Nº {group[0].viaje_n}</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 999, background: "#dbeafe", color: "#0c4a6e" }}>❄ REFRIGERADO</span>
+                    {nearDep && <span style={QS.urgentBadge}>⚡ &lt;45 min</span>}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={QS.pendCount}>{combinedCount} / {group[0].merch_threshold ?? 25} pales</span>
+                    <button onClick={() => { if (confirm("¿Priorizar este viaje a la cola aunque falte mercancía?")) handleForceQueued(group[0].id); }} style={QS.prioritizeBtn}>↑ Priorizar</button>
+                  </div>
+                </div>
+                {group.map((it) => (
+                  <PendingMerchCard key={it.id} item={it} onRemove={() => handleRemove(it.id)} onRefreshNumsup={(ruta) => handleRefreshNumsup(it.id, ruta)} />
                 ))}
               </div>
             );
@@ -929,11 +1057,6 @@ const QS = {
   odbcBtn: { display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "#15803d", cursor: "pointer", fontFamily: "inherit", marginRight: 6, letterSpacing: 0.5 },
   clearBtn: { display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: "#fff", border: "1px solid #fecaca", borderRadius: 8, fontSize: 12, color: "#dc2626", cursor: "pointer", fontFamily: "inherit" },
 
-  viewToggleBar: { display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", background: "#f4f4f3", borderBottom: "1px solid #e7e5e4", flexShrink: 0 },
-  viewBtn: { padding: "6px 18px", borderRadius: 6, border: "1px solid #e7e5e4", background: "#fff", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", letterSpacing: 0.4, color: "#78716c" },
-  viewBtnAmbActive: { background: "#fff7ed", borderColor: "#fed7aa", color: "#9a3412", boxShadow: "0 1px 4px rgba(0,0,0,0.08)" },
-  viewBtnRefActive: { background: "#eff6ff", borderColor: "#93c5fd", color: "#0c4a6e", boxShadow: "0 1px 4px rgba(0,0,0,0.08)" },
-  otherCount: { fontSize: 10.5, color: "#a8a29e", padding: "3px 10px", background: "#fff", border: "1px solid #e7e5e4", borderRadius: 999, marginLeft: 4 },
   tabBar: { display: "flex", background: "#fff", borderBottom: "1px solid #e7e5e4", flexShrink: 0, padding: "0 16px", gap: 4 },
   tab: { padding: "10px 16px", fontSize: 12.5, fontWeight: 600, color: "#78716c", background: "transparent", border: "none", borderBottom: "2px solid transparent", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6, marginBottom: -1 },
   tabActive: { color: "#1c1917", borderBottomColor: "#1c1917" },
