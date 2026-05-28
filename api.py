@@ -187,11 +187,22 @@ class Api:
                     ok = combined >= threshold
                     is_combined = len(group) > 1
                     trip_destinos = [g.get("destino", "") for g in group]
+                    trip_centers = [
+                        {
+                            "destino": g.get("destino", ""),
+                            "numsup_count": g.get("numsup_count", 0),
+                            "ruta_carga": g.get("ruta_carga"),
+                            "cod_centro": g.get("cod_centro", ""),
+                        }
+                        for g in group
+                    ]
                     for g in group:
                         g["combined_count"] = combined
                         g["mercancia_ok"] = ok
                         g["is_combined"] = is_combined
                         g["trip_destinos"] = trip_destinos
+                        g["trip_centers"] = trip_centers
+                        g["merch_threshold"] = threshold
 
                 added = queue_manager.get_manager().auto_enqueue_from_rows(rows)
             except Exception:

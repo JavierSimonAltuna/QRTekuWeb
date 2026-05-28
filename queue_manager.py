@@ -159,6 +159,8 @@ class QueueManager:
                             existing["combined_count"] = r.get("combined_count")
                             existing["numsup_count"] = r.get("numsup_count")
                             existing["mercancia_ok"] = new_ok
+                            existing["trip_centers"] = r.get("trip_centers", existing.get("trip_centers", []))
+                            existing["merch_threshold"] = r.get("merch_threshold", existing.get("merch_threshold"))
                             if new_ok:
                                 existing["status"] = "queued"
                                 changed = True
@@ -276,6 +278,8 @@ class QueueManager:
             "numsup_count": row.get("numsup_count"),
             "is_combined": bool(row.get("is_combined", False)),
             "trip_destinos": row.get("trip_destinos", []),
+            "trip_centers": row.get("trip_centers", []),
+            "merch_threshold": row.get("merch_threshold"),
             "touliv1": row.get("touliv1"),
             "ruta_carga": row.get("ruta_carga"),
             "comment": "",

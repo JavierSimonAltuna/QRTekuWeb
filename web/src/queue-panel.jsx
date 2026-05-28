@@ -343,20 +343,29 @@ const QueuePanel = ({ pushToast }) => {
               }}>
                 {/* Cabecera del grupo */}
                 <div style={QS.pendGroupHead}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     {isCombo && (
                       <span style={QS.comboBadge}>COMBINADO</span>
                     )}
                     <span style={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#57534e" }}>
                       Nº {group[0].viaje_n}
                     </span>
+                    {group[0].tipo_carga && (
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 999,
+                        background: group[0].tipo_carga === "REFRIGERADO" ? "#dbeafe" : "#ffedd5",
+                        color: group[0].tipo_carga === "REFRIGERADO" ? "#0c4a6e" : "#9a3412",
+                      }}>
+                        {group[0].tipo_carga === "REFRIGERADO" ? "❄" : "☼"} {group[0].tipo_carga}
+                      </span>
+                    )}
                     {nearDep && (
                       <span style={QS.urgentBadge}>⚡ &lt;45 min</span>
                     )}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <span style={QS.pendCount}>
-                      {combinedCount} / 25 pales
+                      {combinedCount} / {group[0].merch_threshold ?? 25} pales
                     </span>
                     <button
                       onClick={() => { if (confirm("¿Priorizar este viaje a la cola aunque falte mercancía?")) handleForceQueued(group[0].id); }}
@@ -697,59 +706,98 @@ const PendingMerchCard = ({ item, onRemove, onRefreshNumsup }) => {
   const [editRuta, setEditRuta] = useState(false);
   const [rutaVal, setRutaVal] = useState(String(item.ruta_carga ?? ""));
   const pales = item.numsup_count ?? "?";
-  const palesColor = typeof pales === "number" ? (pales >= 25 ? "#15803d" : pales >= 15 ? "#d97706" : "#dc2626") : "#a8a29e";
+  const paleColor = (n) => typeof n === "number" ? (n >= 25 ? "#15803d" : n >= 10 ? "#d97706" : "#dc2626") : "#a8a29e";
+  const isRefr = item.tipo_carga === "REFRIGERADO";
+  const centers = (item.trip_centers && item.trip_centers.length > 1) ? item.trip_centers : null;
+
   return (
     <div style={QS.pendCard}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#1c1917" }}>{item.destino}</div>
-          <div style={{ fontSize: 11, color: "#78716c", marginTop: 3 }}>
-            {item.tractora && <span style={{ fontFamily: "ui-monospace, monospace", marginRight: 8 }}>{item.tractora}</span>}
-            Muelle {(item.muelle || "—").padStart(2, "0")}
-            {item.hora_salida && <span> · Salida {item.hora_salida}</span>}
+          {/* Info común: matrícula · muelle · salida · tipo */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 11, color: "#78716c" }}>
+            {item.tractora && (
+              <span style={{ fontFamily: "ui-monospace, monospace", fontWeight: 700, color: "#1c1917" }}>{item.tractora}</span>
+            )}
+            <span>Muelle {(item.muelle || "—").padStart(2, "0")}</span>
+            {item.hora_salida && <span>· Salida {item.hora_salida}</span>}
+            <span style={{
+              fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 999,
+              background: isRefr ? "#dbeafe" : "#ffedd5",
+              color: isRefr ? "#0c4a6e" : "#9a3412",
+            }}>
+              {isRefr ? "❄ REFR" : "☼ AMB"}
+            </span>
           </div>
-          {/* Ruta + pales con edición inline */}
-          {!editRuta ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5 }}>
-              {item.ruta_carga != null
-                ? <span style={{ fontSize: 10.5, color: "#78716c" }}>RUTA <b>{item.ruta_carga}</b></span>
-                : <span style={{ fontSize: 10.5, color: "#dc2626" }}>Sin ruta detectada</span>
-              }
-              <span style={{ fontSize: 12, fontWeight: 700, color: palesColor }}>
-                {pales} pales
-              </span>
-              <button
-                onClick={() => setEditRuta(true)}
-                style={{ fontSize: 10, color: "#0ea5e9", background: "none", border: "none", cursor: "pointer", padding: 0 }}
-                title="Editar ruta manualmente"
-              >
-                ✎ editar
-              </button>
+
+          {centers ? (
+            /* Desglose por centro para viajes combinados */
+            <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 0 }}>
+              {centers.map((c, i) => (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "5px 0",
+                  borderBottom: i < centers.length - 1 ? "1px solid #f4f4f3" : "none",
+                }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#1c1917", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {c.destino}
+                  </span>
+                  {c.ruta_carga != null && (
+                    <span style={{ fontSize: 10, color: "#78716c", whiteSpace: "nowrap" }}>RUTA <b>{c.ruta_carga}</b></span>
+                  )}
+                  <span style={{ fontSize: 12, fontWeight: 700, color: paleColor(c.numsup_count), whiteSpace: "nowrap" }}>
+                    {c.numsup_count ?? "?"} pales
+                  </span>
+                </div>
+              ))}
             </div>
           ) : (
-            <div style={{ display: "flex", gap: 5, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 10.5, color: "#78716c" }}>RUTA:</span>
-              <input
-                type="number"
-                value={rutaVal}
-                onChange={(e) => setRutaVal(e.target.value)}
-                style={{ fontSize: 12, padding: "2px 6px", border: "1px solid #d6d3d1", borderRadius: 4, width: 70 }}
-                placeholder="Nº ruta"
-                autoFocus
-              />
-              <button
-                onClick={() => { if (rutaVal) onRefreshNumsup(rutaVal); setEditRuta(false); }}
-                style={{ fontSize: 11, padding: "3px 9px", background: "#0ea5e9", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}
-              >
-                Buscar
-              </button>
-              <button
-                onClick={() => setEditRuta(false)}
-                style={{ fontSize: 11, padding: "3px 7px", background: "transparent", border: "1px solid #d6d3d1", borderRadius: 4, cursor: "pointer", color: "#78716c" }}
-              >
-                ✕
-              </button>
-            </div>
+            /* Centro único */
+            <>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#1c1917", marginTop: 4 }}>{item.destino}</div>
+              {!editRuta ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5 }}>
+                  {item.ruta_carga != null
+                    ? <span style={{ fontSize: 10.5, color: "#78716c" }}>RUTA <b>{item.ruta_carga}</b></span>
+                    : <span style={{ fontSize: 10.5, color: "#dc2626" }}>Sin ruta detectada</span>
+                  }
+                  <span style={{ fontSize: 12, fontWeight: 700, color: paleColor(pales) }}>
+                    {pales} pales
+                  </span>
+                  <button
+                    onClick={() => setEditRuta(true)}
+                    style={{ fontSize: 10, color: "#0ea5e9", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                    title="Editar ruta manualmente"
+                  >
+                    ✎ editar
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 5, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 10.5, color: "#78716c" }}>RUTA:</span>
+                  <input
+                    type="number"
+                    value={rutaVal}
+                    onChange={(e) => setRutaVal(e.target.value)}
+                    style={{ fontSize: 12, padding: "2px 6px", border: "1px solid #d6d3d1", borderRadius: 4, width: 70 }}
+                    placeholder="Nº ruta"
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => { if (rutaVal) onRefreshNumsup(rutaVal); setEditRuta(false); }}
+                    style={{ fontSize: 11, padding: "3px 9px", background: "#0ea5e9", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}
+                  >
+                    Buscar
+                  </button>
+                  <button
+                    onClick={() => setEditRuta(false)}
+                    style={{ fontSize: 11, padding: "3px 7px", background: "transparent", border: "1px solid #d6d3d1", borderRadius: 4, cursor: "pointer", color: "#78716c" }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
         <button onClick={onRemove} style={{ ...QS.iconBtn, color: "#a8a29e", marginTop: -2, flexShrink: 0 }}>
