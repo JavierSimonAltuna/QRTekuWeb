@@ -29,6 +29,31 @@ ODBC_PWD = "infolog"
 TABLE_NAME   = "FGE50STO.GEZCAM"
 TABLE_GECLI2  = "FGE50STO.GECLI2"
 TABLE_GESUPE6 = "FGE50STO.GESUPE6"
+TABLE_GESUPEJ = "FGE50STO.GESUPEJ"
+TABLE_GEZCAT  = "FGE50STO.GEZCAT"
+
+# Tipos de camión AMBIENTE (col F); el resto = REFRIGERADO
+TIPOS_AMBIENTE = frozenset({"1", "2", "3"})
+
+# Categorías CATCLI (extraídas de GEZCAT)
+CATCLI_HIPER   = frozenset({"110", "120", "130", "160", "185", "190"})
+CATCLI_MARKET  = frozenset({"220", "250", "323"})
+CATCLI_EXPRESS = frozenset({"470", "480", "484"})
+
+# Clientes adelantados con marca "A" (col W): cod_centro normalizado a 8 dígitos
+# SLAM se detecta por col_i = "depósito" (sin código fijo)
+ADELANTADOS_MANANA = frozenset({"00000034", "00004382"})  # salida < 14:00
+ADELANTADOS_TARDE  = frozenset({"00000035", "00000079", "00000642", "00004333", "00000046"})  # 16:30-17:00
+
+# Clientes gallegos: hora_acule <12:00 → cargar antes 16:00; si no → hora plan
+GALLEGOS = frozenset({
+    "00000610", "00000770", "00000834", "00000626", "00000334",
+    "00000665", "00000972", "00000054", "00000811",
+    "00000426", "00006270",  # Depósito Salgueirós (Market Santiago + Pregontoiro)
+})
+
+# CODACT válidos para GESUPEJ AMBIENTE; refrigerado usa NOT IN
+_GESUPEJ_CODACT_AMBIENTE = ("'001'", "'007'", "'101'", "'107'", "'201'", "'207'", "'300'")
 
 TABLE_CHF_PATH = r"C:\Users\QrCarga\TABLA CHF.xlsx"
 
@@ -59,7 +84,8 @@ SAVE_DIR = _resolve_save_dir()
 # Caché ODBC en memoria + tabla CHF Excel (fallback)
 _odbc_cache: dict[str, tuple[str, str]] = {}
 _client_cache: dict[str, tuple[str, str]] = {}
-_touliv1_cache: dict[str, "int | None"] = {}
+_touliv1_cache: dict[str, tuple] = {}       # key = "codcli:codact" → (int|None, catcli_str)
+_gezcat_cache: "dict[str, str] | None" = None  # CATCLI → LIBCAT; None = no cargado
 _df_chf_cache: pd.DataFrame | None = None
 
 # Log de diagnóstico ODBC (últimas 100 operaciones)
@@ -441,6 +467,19 @@ def load_excel(path: str) -> tuple[list[dict], str]:
                         hora_salida = v
                         break
 
+        # TIPO VIAJE: "ambiente" si col F in {"1","2","3"}, si no "refrigerado"
+        tipo_viaje = "ambiente" if tipo.strip() in TIPOS_AMBIENTE else "refrigerado"
+
+        # COL I (índice 8) — identifica SLAM/adelantados especiales por valor "depósito"
+        col_i = ""
+        for col in df.columns:
+            cu = str(col).upper().replace("\r", "").replace("\n", "").replace(" ", "").replace("\t", "")
+            if cu == "I":
+                col_i = _safe_str(r.get(col, "")).strip()
+                break
+        if not col_i and len(df.columns) > 8:
+            col_i = _safe_str(r.iloc[8]).strip()
+
         # COL W (índice 22) — indica tipo especial: "A" → ruta_carga = TOULIV1+1
         col_w = ""
         for col in df.columns:
@@ -500,6 +539,8 @@ def load_excel(path: str) -> tuple[list[dict], str]:
             "hora_salida": hora_salida,
             "cod_centro": cod_centro,
             "col_w": col_w,
+            "col_i": col_i,
+            "tipo_viaje": tipo_viaje,
             "precinto": precinto,
             "precintos_data": precintos_data,
             "ya_cargado": bool(n and n in green_n_set),
@@ -638,43 +679,105 @@ def _to_codcli_key(cod_cli) -> str:
     return s
 
 
-def odbc_lookup_touliv1(cod_cli: str) -> "int | None":
+def odbc_load_gezcat() -> "dict[str, str]":
+    """Carga GEZCAT completo (sin filtros): {CATCLI: LIBCAT}. Cachea en memoria."""
+    global _gezcat_cache
+    if _gezcat_cache is not None:
+        return _gezcat_cache
+    result: dict[str, str] = {}
+    try:
+        import pyodbc
+        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=8)
+        cur = conn.cursor()
+        cur.execute(f"SELECT CATCLI, LIBCAT FROM {TABLE_GEZCAT}")
+        for row in cur.fetchall():
+            cat = str(row[0] or "").strip()
+            lib = str(row[1] or "").strip()
+            if cat:
+                result[cat] = lib
+        cur.close()
+        conn.close()
+        _log_odbc("GEZCAT", "*", "OK", len(result))
+    except Exception as e:
+        _log_odbc("GEZCAT", "*", "ERROR", error=str(e))
+    _gezcat_cache = result
+    return result
+
+
+def get_categoria_tipo(catcli: str) -> str:
+    """Clasifica el CATCLI en 'hiper', 'market', 'express' u 'otro'."""
+    c = str(catcli).strip()
+    if c in CATCLI_HIPER:   return "hiper"
+    if c in CATCLI_MARKET:  return "market"
+    if c in CATCLI_EXPRESS: return "express"
+    return "otro"
+
+
+def get_min_pales(catcli: str, tipo_camion: str) -> "int | None":
+    """Mínimo de pales validados para iniciar carga. None = sin mínimo (criterio hora)."""
+    cat = get_categoria_tipo(catcli)
+    if cat == "hiper":
+        return 35
+    if cat == "market":
+        tc = str(tipo_camion).strip()
+        if tc == "1": return 35
+        if tc == "2": return 13
+        if tc == "3": return 17
+        return None
+    return None  # express, cepsa y demás: sin mínimo
+
+
+def get_ideal_pales(catcli: str) -> "int | None":
+    """Valor ideal de pales para carga completa. None = sin objetivo definido."""
+    cat = get_categoria_tipo(catcli)
+    if cat == "hiper":
+        return 40
+    return None
+
+
+def odbc_lookup_touliv1(cod_cli: str, codact: str = "101") -> "tuple[int | None, str]":
     """
-    Busca TOULIV1 en FGE50STO.GECLI2 por CODCLI.
-    Devuelve el int o None si no se encuentra. Cachea resultados.
+    Busca TOULIV1 y CATCLI en FGE50STO.GECLI2 por CODCLI y CODACT (campo CHAR).
+    - Ambiente:     codact='101'
+    - Refrigerado:  codact='003'
+    Devuelve (touliv1: int|None, catcli: str). Cachea por (codcli, codact).
     """
     key = _to_codcli_key(cod_cli)
     if not key or key == "00000000":
-        return None
-    if key in _touliv1_cache:
-        cached = _touliv1_cache[key]
-        _log_odbc("TOULIV1", key, "CACHE", cached)
+        return None, ""
+    cache_key = f"{key}:{codact}"
+    if cache_key in _touliv1_cache:
+        cached = _touliv1_cache[cache_key]
+        _log_odbc("TOULIV1", cache_key, "CACHE", cached[0])
         return cached
     result = None
+    catcli = ""
     try:
         import pyodbc
         conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=5)
         cur = conn.cursor()
         cur.execute(
-            f"SELECT TOULIV1 FROM {TABLE_GECLI2} WHERE CODCLI = ? AND CODACT = 101 FETCH FIRST 1 ROWS ONLY",
-            key,
+            f"SELECT TOULIV1, CATCLI FROM {TABLE_GECLI2} WHERE CODCLI = ? AND CODACT = ? FETCH FIRST 1 ROWS ONLY",
+            key, codact,
         )
         row = cur.fetchone()
-        if row and row[0] is not None:
-            try:
-                result = int(row[0])
-            except (ValueError, TypeError):
-                result = None
+        if row:
+            if row[0] is not None:
+                try:
+                    result = int(row[0])
+                except (ValueError, TypeError):
+                    result = None
+            catcli = str(row[1] or "").strip()
         cur.close()
         conn.close()
         if result is not None:
-            _log_odbc("TOULIV1", key, "OK", result)
+            _log_odbc("TOULIV1", cache_key, "OK", result)
         else:
-            _log_odbc("TOULIV1", key, "NOT_FOUND")
+            _log_odbc("TOULIV1", cache_key, "NOT_FOUND")
     except Exception as e:
-        _log_odbc("TOULIV1", key, "ERROR", error=str(e))
-    _touliv1_cache[key] = result
-    return result
+        _log_odbc("TOULIV1", cache_key, "ERROR", error=str(e))
+    _touliv1_cache[cache_key] = (result, catcli)
+    return result, catcli
 
 
 def odbc_count_gesupe6(ruta_carga: int) -> int:
@@ -699,6 +802,38 @@ def odbc_count_gesupe6(ruta_carga: int) -> int:
         return count
     except Exception as e:
         _log_odbc("GESUPE6", key, "ERROR", error=str(e))
+        return 0
+
+
+def odbc_count_gesupej(cod_cli: str, ambiente: bool = True) -> int:
+    """
+    Cuenta pales validados en GESUPEJ por cliente (tiempo real, sin caché).
+    - ambiente=True:  CODACT IN  ('001','007','101','107','201','207','300')
+    - ambiente=False: CODACT NOT IN (mismos valores)
+    Siempre filtra ETASUP = 30, TYPSUP <> '3' y CLILIV = cod_cliente normalizado 8 dígitos.
+    """
+    key = _to_codcli_key(cod_cli)
+    if not key or key == "00000000":
+        return 0
+    codact_list = ", ".join(_GESUPEJ_CODACT_AMBIENTE)
+    codact_clause = f"CODACT IN ({codact_list})" if ambiente else f"CODACT NOT IN ({codact_list})"
+    log_key = f"{key}:{'amb' if ambiente else 'ref'}"
+    try:
+        import pyodbc
+        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=5)
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT COUNT(*) FROM {TABLE_GESUPEJ} WHERE CLILIV = ? AND {codact_clause} AND ETASUP = 30 AND TYPSUP <> '3'",
+            key,
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        count = int(row[0]) if row else 0
+        _log_odbc("GESUPEJ", log_key, "OK", count)
+        return count
+    except Exception as e:
+        _log_odbc("GESUPEJ", log_key, "ERROR", error=str(e))
         return 0
 
 
