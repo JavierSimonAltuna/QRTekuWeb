@@ -34,8 +34,8 @@ LOADERS_FILE = core.SAVE_DIR / "bleecker_loaders.json"
 
 # ─── Cargadores demo por defecto (editables desde Tweaks) ──────────
 DEFAULT_LOADERS = [
-    {"id": "L01", "pin": "1111", "name": "Cargador 1", "muelle_actual": "01", "active": True},
-    {"id": "L02", "pin": "2222", "name": "Cargador 2", "muelle_actual": "08", "active": True},
+    {"id": "L01", "pin": "1111", "name": "Cargador 1", "muelle_actual": "01", "active": True, "queue_type": "ambiente"},
+    {"id": "L02", "pin": "2222", "name": "Cargador 2", "muelle_actual": "08", "active": True, "queue_type": "ambiente"},
 ]
 
 
@@ -264,7 +264,7 @@ class QueueManager:
             "precintos": row.get("precintos_data", []),
             "qr_png_b64": qr_b64,
             "qr_payload_compact": compact,
-            "urgente": bool(urgente),
+            "urgente": bool(urgente) or row.get("adelantado_tipo") == "manana" or bool(row.get("gallego_urgente", False)),
             "status": initial_status,
             "assigned_to": None,
             "assigned_at": None,
@@ -280,6 +280,8 @@ class QueueManager:
             "trip_destinos": row.get("trip_destinos", []),
             "trip_centers": row.get("trip_centers", []),
             "merch_threshold": row.get("merch_threshold"),
+            "queue_type": row.get("queue_type", "ambiente"),
+            "gallego_urgente": bool(row.get("gallego_urgente", False)),
             "touliv1": row.get("touliv1"),
             "ruta_carga": row.get("ruta_carga"),
             "comment": "",
@@ -342,7 +344,9 @@ class QueueManager:
             if not loader:
                 return None
             muelle_loader = loader.get("muelle_actual", "00")
-            pool = [it for it in self._items if it["status"] == "queued" and not it.get("blocked")]
+            loader_qt = loader.get("queue_type", "ambiente")
+            pool = [it for it in self._items if it["status"] == "queued" and not it.get("blocked")
+                    and it.get("queue_type", "ambiente") == loader_qt]
             if not pool:
                 return None
             # Ordenamos: (no-urgente=1, urgente=0)  → urgentes primero
@@ -510,27 +514,38 @@ class QueueManager:
     def snapshot(self) -> dict:
         with self._lock:
             self._promote_urgent_pending()
-            queued = [it for it in self._items if it["status"] == "queued"]
-            assigned = [it for it in self._items if it["status"] == "assigned"]
+            sort_q = lambda it: (0 if it["urgente"] else 1, self._parse_time(it["hora_salida"]))
+            sort_p = lambda it: self._parse_time(it.get("hora_salida", ""))
             done = [it for it in self._items if it["status"] == "done"]
-            pending_merch = [it for it in self._items if it["status"] == "pending_merch"]
-            queued.sort(key=lambda it: (
-                0 if it["urgente"] else 1,
-                self._parse_time(it["hora_salida"]),
-            ))
-            pending_merch.sort(key=lambda it: self._parse_time(it.get("hora_salida", "")))
-            blocked_count = sum(1 for it in queued if it.get("blocked"))
+
+            def _qt(it):
+                return it.get("queue_type", "ambiente")
+
+            queued_amb = sorted([it for it in self._items if it["status"] == "queued" and _qt(it) == "ambiente"], key=sort_q)
+            queued_ref = sorted([it for it in self._items if it["status"] == "queued" and _qt(it) == "refrigerado"], key=sort_q)
+            assigned_amb = [it for it in self._items if it["status"] == "assigned" and _qt(it) == "ambiente"]
+            assigned_ref = [it for it in self._items if it["status"] == "assigned" and _qt(it) == "refrigerado"]
+            pending_amb = sorted([it for it in self._items if it["status"] == "pending_merch" and _qt(it) == "ambiente"], key=sort_p)
+            pending_ref = sorted([it for it in self._items if it["status"] == "pending_merch" and _qt(it) == "refrigerado"], key=sort_p)
+
+            blocked_count = sum(1 for it in self._items if it["status"] == "queued" and it.get("blocked"))
             return {
-                "queued": queued,
-                "assigned": assigned,
+                "queued": queued_amb,
+                "queued_refr": queued_ref,
+                "assigned": assigned_amb,
+                "assigned_refr": assigned_ref,
                 "done": done[-20:],
-                "pending_merch": pending_merch,
+                "pending_merch": pending_amb,
+                "pending_merch_refr": pending_ref,
                 "loaders": self._loaders,
                 "counts": {
-                    "queued": len(queued),
-                    "assigned": len(assigned),
+                    "queued": len(queued_amb),
+                    "queued_refr": len(queued_ref),
+                    "assigned": len(assigned_amb),
+                    "assigned_refr": len(assigned_ref),
                     "done": len(done),
-                    "pending_merch": len(pending_merch),
+                    "pending_merch": len(pending_amb),
+                    "pending_merch_refr": len(pending_ref),
                     "blocked": blocked_count,
                 },
             }

@@ -156,7 +156,8 @@ class Api:
                             norm_key = core._to_codcli_key(cod_centro)
                             col_w = str(r.get("col_w", "")).strip().upper()
                             col_i = str(r.get("col_i", "")).strip().upper()
-                            if col_w == "A":
+                            is_adelantado = col_w == "A"
+                            if is_adelantado:
                                 if norm_key in core.ADELANTADOS_MANANA or "DEP" in col_i:
                                     r["adelantado_tipo"] = "manana"
                                 elif norm_key in core.ADELANTADOS_TARDE:
@@ -164,7 +165,19 @@ class Api:
                                 else:
                                     r["adelantado_tipo"] = "A"
 
-                            r["es_gallego"] = norm_key in core.GALLEGOS
+                            es_gallego = norm_key in core.GALLEGOS
+                            r["es_gallego"] = es_gallego
+                            if es_gallego:
+                                try:
+                                    h_str = str(r.get("hora_acule", "")).strip().split(":")[0]
+                                    r["gallego_urgente"] = int(h_str) < 12
+                                except Exception:
+                                    r["gallego_urgente"] = False
+                            else:
+                                r["gallego_urgente"] = False
+
+                            # Adelantados (marca A) siempre van a cola ambiente aunque sean refrigerado
+                            r["queue_type"] = "refrigerado" if (not es_ambiente and not is_adelantado) else "ambiente"
                     except Exception:
                         r["numsup_count"] = 0
 

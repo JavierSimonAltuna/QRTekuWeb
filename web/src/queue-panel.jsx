@@ -6,10 +6,15 @@ const { useState, useEffect, useCallback } = React;
 
 const QueuePanel = ({ pushToast }) => {
   const [snap, setSnap] = useState({
-    queued: [], assigned: [], done: [], pending_merch: [], loaders: [],
-    counts: { queued: 0, assigned: 0, done: 0, pending_merch: 0 }
+    queued: [], queued_refr: [],
+    assigned: [], assigned_refr: [],
+    done: [],
+    pending_merch: [], pending_merch_refr: [],
+    loaders: [],
+    counts: { queued: 0, queued_refr: 0, assigned: 0, assigned_refr: 0, done: 0, pending_merch: 0, pending_merch_refr: 0, blocked: 0 }
   });
   const [activeTab, setActiveTab] = useState("cola");
+  const [queueView, setQueueView] = useState("ambiente");
   const [reassignFor, setReassignFor] = useState(null);
   const [helperMenuFor, setHelperMenuFor] = useState(null);
   const [search, setSearch] = useState("");
@@ -126,7 +131,18 @@ const QueuePanel = ({ pushToast }) => {
   };
 
   const loaderById = (id) => snap.loaders.find((l) => l.id === id);
-  const pendingMerch = snap.pending_merch || [];
+
+  const isAmbView = queueView === "ambiente";
+  const viewQueued     = isAmbView ? (snap.queued       || []) : (snap.queued_refr       || []);
+  const viewAssigned   = isAmbView ? (snap.assigned     || []) : (snap.assigned_refr     || []);
+  const viewPending    = isAmbView ? (snap.pending_merch|| []) : (snap.pending_merch_refr|| []);
+  const viewLoaders    = snap.loaders.filter(l => (l.queue_type || "ambiente") === queueView);
+  const viewCounts = {
+    queued:       isAmbView ? snap.counts.queued       : (snap.counts.queued_refr       || 0),
+    assigned:     isAmbView ? snap.counts.assigned     : (snap.counts.assigned_refr     || 0),
+    pending_merch:isAmbView ? snap.counts.pending_merch: (snap.counts.pending_merch_refr|| 0),
+  };
+  const pendingMerch = viewPending;
 
   // Agrupar pending_merch por viaje_n para mostrar combinados juntos
   const pendingGroups = (() => {
@@ -143,11 +159,11 @@ const QueuePanel = ({ pushToast }) => {
     <div style={QS.root}>
       {/* ─── Header stats + tabs ─── */}
       <div style={QS.stats}>
-        <StatBig label="En cola"     value={snap.counts.queued}   color="#1c1917" />
-        <StatBig label="Asignadas"   value={snap.counts.assigned} color="#0ea5e9" />
-        <StatBig label="Completadas" value={snap.counts.done}     color="#15803d" />
-        {(snap.counts.pending_merch || 0) > 0 && (
-          <StatBig label="Sin mercancía" value={snap.counts.pending_merch} color="#d97706" />
+        <StatBig label="En cola"     value={viewCounts.queued}      color="#1c1917" />
+        <StatBig label="Asignadas"   value={viewCounts.assigned}    color="#0ea5e9" />
+        <StatBig label="Completadas" value={snap.counts.done}       color="#15803d" />
+        {viewCounts.pending_merch > 0 && (
+          <StatBig label="Sin mercancía" value={viewCounts.pending_merch} color="#d97706" />
         )}
         <div style={{ flex: 1 }} />
         <button onClick={refresh} style={QS.refreshBtn} title="Refrescar">
@@ -171,6 +187,28 @@ const QueuePanel = ({ pushToast }) => {
         )}
       </div>
 
+      {/* ─── Toggle Ambiente / Refrigerado ─── */}
+      <div style={QS.viewToggleBar}>
+        <button
+          onClick={() => setQueueView("ambiente")}
+          style={{ ...QS.viewBtn, ...(queueView === "ambiente" ? QS.viewBtnAmbActive : {}) }}
+        >
+          ☼ AMBIENTE
+        </button>
+        <button
+          onClick={() => setQueueView("refrigerado")}
+          style={{ ...QS.viewBtn, ...(queueView === "refrigerado" ? QS.viewBtnRefActive : {}) }}
+        >
+          ❄ REFRIGERADO
+        </button>
+        {queueView === "ambiente" && (snap.counts.queued_refr || 0) > 0 && (
+          <span style={QS.otherCount}>{snap.counts.queued_refr} en cola REFRI</span>
+        )}
+        {queueView === "refrigerado" && snap.counts.queued > 0 && (
+          <span style={QS.otherCount}>{snap.counts.queued} en cola AMB</span>
+        )}
+      </div>
+
       {/* ─── Tabs ─── */}
       <div style={QS.tabBar}>
         <button
@@ -178,8 +216,8 @@ const QueuePanel = ({ pushToast }) => {
           style={{ ...QS.tab, ...(activeTab === "cola" ? QS.tabActive : {}) }}
         >
           Cola de cargas
-          {snap.counts.queued > 0 && (
-            <span style={QS.tabBadge}>{snap.counts.queued}</span>
+          {viewCounts.queued > 0 && (
+            <span style={QS.tabBadge}>{viewCounts.queued}</span>
           )}
         </button>
         <button
@@ -221,15 +259,15 @@ const QueuePanel = ({ pushToast }) => {
           <section style={QS.col}>
             <div style={QS.colHead}>
               <span style={QS.colTitle}>Cola</span>
-              <span style={QS.colCount}>{snap.queued.length}</span>
+              <span style={QS.colCount}>{viewQueued.length}</span>
             </div>
             <div style={QS.list}>
-              {snap.queued.filter(matchesSearch).length === 0 ? (
+              {viewQueued.filter(matchesSearch).length === 0 ? (
                 <EmptyMini
                   label={search ? "Sin resultados" : "Sin cargas en cola"}
                   hint={search ? `No coincide ningún elemento con "${search}"` : "Se añaden automáticamente cuando se detecta la hora de acule"}
                 />
-              ) : snap.queued.filter(matchesSearch).map((it, i) => (
+              ) : viewQueued.filter(matchesSearch).map((it, i) => (
                 <QueueCard
                   key={it.id}
                   item={it}
@@ -252,15 +290,15 @@ const QueuePanel = ({ pushToast }) => {
           <section style={QS.col}>
             <div style={QS.colHead}>
               <span style={QS.colTitle}>En curso</span>
-              <span style={QS.colCount}>{snap.assigned.length}</span>
+              <span style={QS.colCount}>{viewAssigned.length}</span>
             </div>
             <div style={QS.list}>
-              {snap.assigned.filter(matchesSearch).length === 0 ? (
+              {viewAssigned.filter(matchesSearch).length === 0 ? (
                 <EmptyMini
                   label={search ? "Sin resultados" : "Ninguna carga en curso"}
                   hint={search ? `No coincide ningún elemento con "${search}"` : "Cuando un cargador pida una carga aparecerá aquí"}
                 />
-              ) : snap.assigned.filter(matchesSearch).map((it) => (
+              ) : viewAssigned.filter(matchesSearch).map((it) => (
                 <AssignedCard
                   key={it.id}
                   item={it}
@@ -284,11 +322,11 @@ const QueuePanel = ({ pushToast }) => {
           <section style={QS.col}>
             <div style={QS.colHead}>
               <span style={QS.colTitle}>Cargadores</span>
-              <span style={QS.colCount}>{snap.loaders.filter((l) => l.active).length}</span>
+              <span style={QS.colCount}>{viewLoaders.filter((l) => l.active).length}</span>
             </div>
             <div style={QS.list}>
-              {snap.loaders.map((l) => {
-                const current = snap.assigned.find((a) => a.assigned_to === l.id || a.helper_id === l.id);
+              {viewLoaders.map((l) => {
+                const current = viewAssigned.find((a) => a.assigned_to === l.id || a.helper_id === l.id);
                 return (
                   <LoaderCard key={l.id} loader={l} current={current} />
                 );
@@ -891,6 +929,11 @@ const QS = {
   odbcBtn: { display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "#15803d", cursor: "pointer", fontFamily: "inherit", marginRight: 6, letterSpacing: 0.5 },
   clearBtn: { display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: "#fff", border: "1px solid #fecaca", borderRadius: 8, fontSize: 12, color: "#dc2626", cursor: "pointer", fontFamily: "inherit" },
 
+  viewToggleBar: { display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", background: "#f4f4f3", borderBottom: "1px solid #e7e5e4", flexShrink: 0 },
+  viewBtn: { padding: "6px 18px", borderRadius: 6, border: "1px solid #e7e5e4", background: "#fff", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", letterSpacing: 0.4, color: "#78716c" },
+  viewBtnAmbActive: { background: "#fff7ed", borderColor: "#fed7aa", color: "#9a3412", boxShadow: "0 1px 4px rgba(0,0,0,0.08)" },
+  viewBtnRefActive: { background: "#eff6ff", borderColor: "#93c5fd", color: "#0c4a6e", boxShadow: "0 1px 4px rgba(0,0,0,0.08)" },
+  otherCount: { fontSize: 10.5, color: "#a8a29e", padding: "3px 10px", background: "#fff", border: "1px solid #e7e5e4", borderRadius: 999, marginLeft: 4 },
   tabBar: { display: "flex", background: "#fff", borderBottom: "1px solid #e7e5e4", flexShrink: 0, padding: "0 16px", gap: 4 },
   tab: { padding: "10px 16px", fontSize: 12.5, fontWeight: 600, color: "#78716c", background: "transparent", border: "none", borderBottom: "2px solid transparent", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6, marginBottom: -1 },
   tabActive: { color: "#1c1917", borderBottomColor: "#1c1917" },
