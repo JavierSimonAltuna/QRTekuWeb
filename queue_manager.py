@@ -34,8 +34,8 @@ LOADERS_FILE = core.SAVE_DIR / "bleecker_loaders.json"
 
 # ─── Cargadores demo por defecto (editables desde Tweaks) ──────────
 DEFAULT_LOADERS = [
-    {"id": "L01", "pin": "1111", "name": "Cargador 1", "muelle_actual": "01", "active": True},
-    {"id": "L02", "pin": "2222", "name": "Cargador 2", "muelle_actual": "08", "active": True},
+    {"id": "L01", "pin": "1111", "name": "Cargador 1", "muelle_actual": "01", "active": True, "queue_type": "ambiente"},
+    {"id": "L02", "pin": "2222", "name": "Cargador 2", "muelle_actual": "08", "active": True, "queue_type": "ambiente"},
 ]
 
 
@@ -62,6 +62,12 @@ class QueueManager:
                 data = json.loads(QUEUE_FILE.read_text(encoding="utf-8"))
                 self._items = data.get("items", [])
                 self._counter = data.get("counter", 0)
+                # Migrar items sin queue_type (creados antes del split ambiente/refrigerado)
+                for it in self._items:
+                    if "queue_type" not in it:
+                        is_refr = it.get("tipo_carga", "AMBIENTE") == "REFRIGERADO"
+                        is_adelantado = bool(it.get("adelantado_tipo"))
+                        it["queue_type"] = "refrigerado" if (is_refr and not is_adelantado) else "ambiente"
             except Exception:
                 self._items = []
                 self._counter = 0
@@ -159,6 +165,8 @@ class QueueManager:
                             existing["combined_count"] = r.get("combined_count")
                             existing["numsup_count"] = r.get("numsup_count")
                             existing["mercancia_ok"] = new_ok
+                            existing["trip_centers"] = r.get("trip_centers", existing.get("trip_centers", []))
+                            existing["merch_threshold"] = r.get("merch_threshold", existing.get("merch_threshold"))
                             if new_ok:
                                 existing["status"] = "queued"
                                 changed = True
@@ -262,7 +270,7 @@ class QueueManager:
             "precintos": row.get("precintos_data", []),
             "qr_png_b64": qr_b64,
             "qr_payload_compact": compact,
-            "urgente": bool(urgente),
+            "urgente": bool(urgente) or row.get("adelantado_tipo") == "manana" or bool(row.get("gallego_urgente", False)),
             "status": initial_status,
             "assigned_to": None,
             "assigned_at": None,
@@ -276,9 +284,15 @@ class QueueManager:
             "numsup_count": row.get("numsup_count"),
             "is_combined": bool(row.get("is_combined", False)),
             "trip_destinos": row.get("trip_destinos", []),
+            "trip_centers": row.get("trip_centers", []),
+            "merch_threshold": row.get("merch_threshold"),
+            "queue_type": row.get("queue_type", "ambiente"),
+            "gallego_urgente": bool(row.get("gallego_urgente", False)),
             "touliv1": row.get("touliv1"),
             "ruta_carga": row.get("ruta_carga"),
             "comment": "",
+            "blocked": False,
+            "helper_id": None,
         }
 
     @staticmethod
@@ -336,7 +350,9 @@ class QueueManager:
             if not loader:
                 return None
             muelle_loader = loader.get("muelle_actual", "00")
-            pool = [it for it in self._items if it["status"] == "queued"]
+            loader_qt = loader.get("queue_type", "ambiente")
+            pool = [it for it in self._items if it["status"] == "queued" and not it.get("blocked")
+                    and it.get("queue_type", "ambiente") == loader_qt]
             if not pool:
                 return None
             # Ordenamos: (no-urgente=1, urgente=0)  → urgentes primero
@@ -354,18 +370,22 @@ class QueueManager:
             return chosen
 
     def get_current_for(self, loader_id: str) -> Optional[dict]:
-        """Devuelve la asignación activa del cargador, sin asignar una nueva."""
+        """Devuelve la asignación activa del cargador (primario o ayudante), sin asignar una nueva."""
         with self._lock:
             for it in self._items:
-                if it["status"] == "assigned" and it["assigned_to"] == loader_id:
+                if it["status"] == "assigned" and (
+                    it["assigned_to"] == loader_id or it.get("helper_id") == loader_id
+                ):
                     return it
             return None
 
     def finish(self, item_id: str, loader_id: str) -> dict:
-        """Marca como completada y actualiza muelle_actual del cargador."""
+        """Marca como completada. Puede marcarla tanto el cargador primario como el ayudante."""
         with self._lock:
             for it in self._items:
-                if it["id"] == item_id and it["assigned_to"] == loader_id:
+                if it["id"] == item_id and (
+                    it["assigned_to"] == loader_id or it.get("helper_id") == loader_id
+                ):
                     it["status"] = "done"
                     it["finished_at"] = datetime.now().isoformat(timespec="seconds")
                     it["completed_muelle"] = it["muelle"]
@@ -418,6 +438,46 @@ class QueueManager:
                     return {"ok": True}
             return {"ok": False, "error": "No encontrado"}
 
+    def block_item(self, item_id: str) -> dict:
+        """Bloquea un item de la cola para que no sea asignado automáticamente."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id and it["status"] == "queued":
+                    it["blocked"] = True
+                    self._save()
+                    return {"ok": True}
+            return {"ok": False, "error": "No encontrado o no está en cola"}
+
+    def unblock_item(self, item_id: str) -> dict:
+        """Desbloquea un item para que vuelva a ser elegible para asignación."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id and it["status"] == "queued":
+                    it["blocked"] = False
+                    self._save()
+                    return {"ok": True}
+            return {"ok": False, "error": "No encontrado o no está en cola"}
+
+    def assign_helper(self, item_id: str, helper_loader_id: str) -> dict:
+        """Asigna un segundo cargador como ayudante de una carga ya asignada."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id and it["status"] == "assigned":
+                    it["helper_id"] = helper_loader_id
+                    self._save()
+                    return {"ok": True, "item": it}
+            return {"ok": False, "error": "No encontrado o no está asignada"}
+
+    def remove_helper(self, item_id: str) -> dict:
+        """Elimina el ayudante de una carga."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id:
+                    it["helper_id"] = None
+                    self._save()
+                    return {"ok": True}
+            return {"ok": False, "error": "No encontrado"}
+
     def force_queued(self, item_id: str) -> dict:
         """Fuerza un item pending_merch a la cola como urgente."""
         with self._lock:
@@ -460,26 +520,39 @@ class QueueManager:
     def snapshot(self) -> dict:
         with self._lock:
             self._promote_urgent_pending()
-            queued = [it for it in self._items if it["status"] == "queued"]
-            assigned = [it for it in self._items if it["status"] == "assigned"]
+            sort_q = lambda it: (0 if it["urgente"] else 1, self._parse_time(it["hora_salida"]))
+            sort_p = lambda it: self._parse_time(it.get("hora_salida", ""))
             done = [it for it in self._items if it["status"] == "done"]
-            pending_merch = [it for it in self._items if it["status"] == "pending_merch"]
-            queued.sort(key=lambda it: (
-                0 if it["urgente"] else 1,
-                self._parse_time(it["hora_salida"]),
-            ))
-            pending_merch.sort(key=lambda it: self._parse_time(it.get("hora_salida", "")))
+
+            def _qt(it):
+                return it.get("queue_type", "ambiente")
+
+            queued_amb = sorted([it for it in self._items if it["status"] == "queued" and _qt(it) == "ambiente"], key=sort_q)
+            queued_ref = sorted([it for it in self._items if it["status"] == "queued" and _qt(it) == "refrigerado"], key=sort_q)
+            assigned_amb = [it for it in self._items if it["status"] == "assigned" and _qt(it) == "ambiente"]
+            assigned_ref = [it for it in self._items if it["status"] == "assigned" and _qt(it) == "refrigerado"]
+            pending_amb = sorted([it for it in self._items if it["status"] == "pending_merch" and _qt(it) == "ambiente"], key=sort_p)
+            pending_ref = sorted([it for it in self._items if it["status"] == "pending_merch" and _qt(it) == "refrigerado"], key=sort_p)
+
+            blocked_count = sum(1 for it in self._items if it["status"] == "queued" and it.get("blocked"))
             return {
-                "queued": queued,
-                "assigned": assigned,
+                "queued": queued_amb,
+                "queued_refr": queued_ref,
+                "assigned": assigned_amb,
+                "assigned_refr": assigned_ref,
                 "done": done[-20:],
-                "pending_merch": pending_merch,
+                "pending_merch": pending_amb,
+                "pending_merch_refr": pending_ref,
                 "loaders": self._loaders,
                 "counts": {
-                    "queued": len(queued),
-                    "assigned": len(assigned),
+                    "queued": len(queued_amb),
+                    "queued_refr": len(queued_ref),
+                    "assigned": len(assigned_amb),
+                    "assigned_refr": len(assigned_ref),
                     "done": len(done),
-                    "pending_merch": len(pending_merch),
+                    "pending_merch": len(pending_amb),
+                    "pending_merch_refr": len(pending_ref),
+                    "blocked": blocked_count,
                 },
             }
 
@@ -506,6 +579,15 @@ class QueueManager:
                 existing.update(loader)
             else:
                 self._loaders.append({**loader, "active": True})
+            self._save_loaders()
+            return {"ok": True, "loaders": self._loaders}
+
+    def remove_loader(self, loader_id: str) -> dict:
+        with self._lock:
+            before = len(self._loaders)
+            self._loaders = [l for l in self._loaders if l["id"] != loader_id]
+            if len(self._loaders) == before:
+                return {"ok": False, "error": f"Cargador {loader_id} no encontrado"}
             self._save_loaders()
             return {"ok": True, "loaders": self._loaders}
 

@@ -89,45 +89,100 @@ class Api:
             # y empujarlas a la cola Bleecker automáticamente.
             added = 0
             try:
+                # Precarga tabla de categorías GEZCAT (llamada única sin filtros)
+                try:
+                    gezcat_map = core.odbc_load_gezcat()
+                except Exception:
+                    gezcat_map = {}
+
                 for r in rows:
-                    # Ya cargado: ocultar de vista y excluir de cola
                     if r.get("ya_cargado"):
                         r["estado"] = "done"
-                    # Enriquecer aculados activos
-                    if r.get("aculado") and not r.get("ya_cargado"):
-                        if not r.get("cif"):
-                            matricula = (r.get("matriculas") or "").split("/")[0].strip()
-                            if matricula:
+
+                    # Trigger: solo procesar camiones aculados activos
+                    if not (r.get("aculado") and not r.get("ya_cargado")):
+                        r["fecha"] = fecha_b2
+                        continue
+
+                    # SLAM: sin procesar por ahora
+                    destino_up = str(r.get("destino", "")).upper()
+                    agencia_up = str(r.get("agencia", "")).upper()
+                    if "SLAM" in destino_up or "SLAM" in agencia_up:
+                        r["fecha"] = fecha_b2
+                        continue
+
+                    # CIF/agencia por matrícula
+                    if not r.get("cif"):
+                        matricula = (r.get("matriculas") or "").split("/")[0].strip()
+                        if matricula:
+                            try:
+                                cif, agencia = core.odbc_lookup_chf(matricula)
+                                r["cif"] = cif or ""
+                                r["agencia"] = agencia or r.get("agencia", "")
+                            except Exception:
+                                pass
+
+                    # GECLI2 + GEZCAT + GESUPEJ
+                    try:
+                        cod_centro = r.get("cod_centro", "")
+                        tipo_viaje = r.get("tipo_viaje", "ambiente")
+                        es_ambiente = tipo_viaje == "ambiente"
+                        codact_gecli2 = "101" if es_ambiente else "003"
+
+                        # queue_type solo depende de col_w y tipo_viaje (no de ODBC)
+                        # Adelantados (marca A) siempre van a cola ambiente aunque sean refrigerado
+                        _col_w = str(r.get("col_w", "")).strip().upper()
+                        r["queue_type"] = "refrigerado" if (not es_ambiente and _col_w != "A") else "ambiente"
+
+                        if cod_centro:
+                            touliv1, catcli = core.odbc_lookup_touliv1(cod_centro, codact=codact_gecli2)
+                            r["catcli"] = catcli
+                            r["libcat"] = gezcat_map.get(catcli, "")
+                            categoria_tipo = core.get_categoria_tipo(catcli)
+                            r["categoria_tipo"] = categoria_tipo
+                            min_pales = core.get_min_pales(catcli, r.get("tipo", ""))
+                            r["min_pales"] = min_pales
+                            r["ideal_pales"] = core.get_ideal_pales(catcli)
+
+                            if touliv1 is None:
                                 try:
-                                    cif, agencia = core.odbc_lookup_chf(matricula)
-                                    r["cif"] = cif or ""
-                                    r["agencia"] = agencia or r.get("agencia", "")
+                                    touliv1 = int(float(cod_centro))
+                                except (ValueError, TypeError):
+                                    touliv1 = None
+                            if touliv1 is not None:
+                                col_w = str(r.get("col_w", "")).strip().upper()
+                                ruta_carga = int(touliv1) + 1 if col_w == "A" else int(touliv1) - 5
+                                r["touliv1"] = touliv1
+                                r["ruta_carga"] = ruta_carga
+
+                            numsup = core.odbc_count_gesupej(cod_centro, ambiente=es_ambiente)
+                            r["numsup_count"] = numsup
+
+                            norm_key = core._to_codcli_key(cod_centro)
+                            col_w = str(r.get("col_w", "")).strip().upper()
+                            col_i = str(r.get("col_i", "")).strip().upper()
+                            is_adelantado = col_w == "A"
+                            if is_adelantado:
+                                if norm_key in core.ADELANTADOS_MANANA or "DEP" in col_i:
+                                    r["adelantado_tipo"] = "manana"
+                                elif norm_key in core.ADELANTADOS_TARDE:
+                                    r["adelantado_tipo"] = "tarde"
+                                else:
+                                    r["adelantado_tipo"] = "A"
+
+                            es_gallego = norm_key in core.GALLEGOS
+                            r["es_gallego"] = es_gallego
+                            if es_gallego:
+                                try:
+                                    h_str = str(r.get("hora_acule", "")).strip().split(":")[0]
+                                    r["gallego_urgente"] = int(h_str) < 12
                                 except Exception:
-                                    pass
-                        # GESUPE6: buscar TOULIV1 en GECLI2 por CODCLI → contar pales
-                        try:
-                            cod_centro = r.get("cod_centro", "")
-                            if cod_centro:
-                                # Lookup correcto: CODCLI → TOULIV1 en GECLI2
-                                touliv1 = core.odbc_lookup_touliv1(cod_centro)
-                                if touliv1 is None:
-                                    # Fallback: intentar cod_centro como valor numérico directo
-                                    try:
-                                        touliv1 = int(float(cod_centro))
-                                    except (ValueError, TypeError):
-                                        touliv1 = None
-                                if touliv1 is not None:
-                                    # Col W = "A" → ruta_carga = TOULIV1 + 1
-                                    # En cualquier otro caso → TOULIV1 - 5
-                                    col_w = str(r.get("col_w", "")).strip().upper()
-                                    ruta_carga = int(touliv1) + 1 if col_w == "A" else int(touliv1) - 5
-                                    numsup = core.odbc_count_gesupe6(ruta_carga)
-                                    r["numsup_count"] = numsup
-                                    r["touliv1"] = touliv1
-                                    r["ruta_carga"] = ruta_carga
-                        except Exception:
-                            r["numsup_count"] = 0
-                    # Fecha para QR
+                                    r["gallego_urgente"] = False
+                            else:
+                                r["gallego_urgente"] = False
+                    except Exception:
+                        r["numsup_count"] = 0
+
                     r["fecha"] = fecha_b2
 
                 # Viajes combinados: sumar numsup_count por viaje_n
@@ -142,14 +197,27 @@ class Api:
                             viaje_rows[n].append(r)
                 for n, group in viaje_rows.items():
                     combined = viaje_counts[n]
-                    ok = combined > 25
+                    min_vals = [g.get("min_pales") for g in group if g.get("min_pales") is not None]
+                    threshold = max(min_vals) if min_vals else 25
+                    ok = combined >= threshold
                     is_combined = len(group) > 1
                     trip_destinos = [g.get("destino", "") for g in group]
+                    trip_centers = [
+                        {
+                            "destino": g.get("destino", ""),
+                            "numsup_count": g.get("numsup_count", 0),
+                            "ruta_carga": g.get("ruta_carga"),
+                            "cod_centro": g.get("cod_centro", ""),
+                        }
+                        for g in group
+                    ]
                     for g in group:
                         g["combined_count"] = combined
                         g["mercancia_ok"] = ok
                         g["is_combined"] = is_combined
                         g["trip_destinos"] = trip_destinos
+                        g["trip_centers"] = trip_centers
+                        g["merch_threshold"] = threshold
 
                 added = queue_manager.get_manager().auto_enqueue_from_rows(rows)
             except Exception:
@@ -375,6 +443,34 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def queue_block(self, item_id: str) -> dict:
+        """Bloquea un item de la cola para que no sea asignado automáticamente."""
+        try:
+            return queue_manager.get_manager().block_item(item_id)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def queue_unblock(self, item_id: str) -> dict:
+        """Desbloquea un item bloqueado."""
+        try:
+            return queue_manager.get_manager().unblock_item(item_id)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def queue_assign_helper(self, item_id: str, helper_loader_id: str) -> dict:
+        """Asigna un segundo cargador como ayudante de una carga en curso."""
+        try:
+            return queue_manager.get_manager().assign_helper(item_id, helper_loader_id)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def queue_remove_helper(self, item_id: str) -> dict:
+        """Elimina el ayudante de una carga en curso."""
+        try:
+            return queue_manager.get_manager().remove_helper(item_id)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def queue_send_to_pending_merch(self, item_id: str) -> dict:
         """Mueve un item de la cola a Sin mercancía."""
         try:
@@ -469,6 +565,32 @@ class Api:
         try:
             mgr = queue_manager.get_manager()
             return mgr.upsert_loader({"id": loader_id, "muelle_actual": str(muelle)})
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def loader_upsert(self, loader_id: str, name: str, pin: str, queue_type: str = "ambiente") -> dict:
+        """Crear o actualizar un cargador (supervisor)."""
+        try:
+            loader_id = str(loader_id).strip().upper()
+            name = str(name).strip()
+            pin = str(pin).strip()
+            if not loader_id or not name or not pin:
+                return {"ok": False, "error": "ID, nombre y PIN son obligatorios"}
+            if queue_type not in ("ambiente", "refrigerado"):
+                queue_type = "ambiente"
+            mgr = queue_manager.get_manager()
+            return mgr.upsert_loader({
+                "id": loader_id, "name": name, "pin": pin,
+                "queue_type": queue_type, "active": True,
+            })
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def loader_remove(self, loader_id: str) -> dict:
+        """Eliminar un cargador (supervisor)."""
+        try:
+            mgr = queue_manager.get_manager()
+            return mgr.remove_loader(str(loader_id).strip().upper())
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
