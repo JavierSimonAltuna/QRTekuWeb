@@ -96,76 +96,85 @@ class Api:
                     gezcat_map = {}
 
                 for r in rows:
-                    # Ya cargado: ocultar de vista y excluir de cola
+                    # Ya cargado: marcar y continuar (sin enriquecer)
                     if r.get("ya_cargado"):
                         r["estado"] = "done"
-                    # Enriquecer aculados activos
-                    if r.get("aculado") and not r.get("ya_cargado"):
-                        if not r.get("cif"):
-                            matricula = (r.get("matriculas") or "").split("/")[0].strip()
-                            if matricula:
+                        r["fecha"] = fecha_b2
+                        continue
+
+                    # SLAM: identificado por "SLAM" en destino o agencia → sin procesar por ahora
+                    destino_up = str(r.get("destino", "")).upper()
+                    agencia_up = str(r.get("agencia", "")).upper()
+                    if "SLAM" in destino_up or "SLAM" in agencia_up:
+                        r["fecha"] = fecha_b2
+                        continue
+
+                    # CIF/agencia por matrícula (solo si ya está aculado)
+                    if r.get("aculado") and not r.get("cif"):
+                        matricula = (r.get("matriculas") or "").split("/")[0].strip()
+                        if matricula:
+                            try:
+                                cif, agencia = core.odbc_lookup_chf(matricula)
+                                r["cif"] = cif or ""
+                                r["agencia"] = agencia or r.get("agencia", "")
+                            except Exception:
+                                pass
+
+                    # GECLI2 + GEZCAT + GESUPEJ para TODOS los camiones
+                    try:
+                        cod_centro = r.get("cod_centro", "")
+                        tipo_viaje = r.get("tipo_viaje", "ambiente")
+                        es_ambiente = tipo_viaje == "ambiente"
+                        codact_gecli2 = 101 if es_ambiente else 3
+
+                        if cod_centro:
+                            touliv1, catcli = core.odbc_lookup_touliv1(cod_centro, codact=codact_gecli2)
+                            r["catcli"] = catcli
+                            r["libcat"] = gezcat_map.get(catcli, "")
+                            categoria_tipo = core.get_categoria_tipo(catcli)
+                            r["categoria_tipo"] = categoria_tipo
+                            min_pales = core.get_min_pales(catcli, r.get("tipo", ""))
+                            r["min_pales"] = min_pales
+
+                            if touliv1 is None:
                                 try:
-                                    cif, agencia = core.odbc_lookup_chf(matricula)
-                                    r["cif"] = cif or ""
-                                    r["agencia"] = agencia or r.get("agencia", "")
-                                except Exception:
-                                    pass
-
-                        # GECLI2: CODACT=101 para ambiente, 3 (=003) para refrigerado
-                        try:
-                            cod_centro = r.get("cod_centro", "")
-                            tipo_viaje = r.get("tipo_viaje", "ambiente")
-                            es_ambiente = tipo_viaje == "ambiente"
-                            codact_gecli2 = 101 if es_ambiente else 3
-
-                            if cod_centro:
-                                touliv1, catcli = core.odbc_lookup_touliv1(cod_centro, codact=codact_gecli2)
-                                r["catcli"] = catcli
-
-                                # Nombre de categoría desde GEZCAT
-                                r["libcat"] = gezcat_map.get(catcli, "")
-
-                                # Tipo de centro y mínimo de pales
-                                categoria_tipo = core.get_categoria_tipo(catcli)
-                                r["categoria_tipo"] = categoria_tipo
-                                min_pales = core.get_min_pales(catcli, r.get("tipo", ""))
-                                r["min_pales"] = min_pales
-
-                                if touliv1 is None:
-                                    try:
-                                        touliv1 = int(float(cod_centro))
-                                    except (ValueError, TypeError):
-                                        touliv1 = None
-                                if touliv1 is not None:
-                                    col_w = str(r.get("col_w", "")).strip().upper()
-                                    ruta_carga = int(touliv1) + 1 if col_w == "A" else int(touliv1) - 5
-                                    r["touliv1"] = touliv1
-                                    r["ruta_carga"] = ruta_carga
-
-                                # Conteo pales: GESUPEJ AMBIENTE o REFRIGERADO + ETASUP=30
-                                numsup = core.odbc_count_gesupej(cod_centro, ambiente=es_ambiente)
-                                r["numsup_count"] = numsup
-
-                                # Adelantado (col W = "A")
-                                norm_key = core._to_codcli_key(cod_centro)
+                                    touliv1 = int(float(cod_centro))
+                                except (ValueError, TypeError):
+                                    touliv1 = None
+                            if touliv1 is not None:
                                 col_w = str(r.get("col_w", "")).strip().upper()
-                                col_i = str(r.get("col_i", "")).strip().upper()
-                                if col_w == "A":
-                                    if norm_key in core.ADELANTADOS_MANANA or "DEP" in col_i:
-                                        r["adelantado_tipo"] = "manana"   # <14:00
-                                    elif norm_key in core.ADELANTADOS_TARDE:
-                                        r["adelantado_tipo"] = "tarde"    # 16:30-17:00
-                                    else:
-                                        r["adelantado_tipo"] = "A"
+                                ruta_carga = int(touliv1) + 1 if col_w == "A" else int(touliv1) - 5
+                                r["touliv1"] = touliv1
+                                r["ruta_carga"] = ruta_carga
 
-                                # Gallego
-                                r["es_gallego"] = norm_key in core.GALLEGOS
-                        except Exception:
-                            r["numsup_count"] = 0
-                    # Fecha para QR
+                            # Pales validados en GESUPEJ (todos los camiones, tiempo real)
+                            numsup = core.odbc_count_gesupej(cod_centro, ambiente=es_ambiente)
+                            r["numsup_count"] = numsup
+
+                            # Adelantado (col W = "A") + tipo de ventana horaria
+                            norm_key = core._to_codcli_key(cod_centro)
+                            col_w = str(r.get("col_w", "")).strip().upper()
+                            col_i = str(r.get("col_i", "")).strip().upper()
+                            if col_w == "A":
+                                if norm_key in core.ADELANTADOS_MANANA or "DEP" in col_i:
+                                    r["adelantado_tipo"] = "manana"   # salida < 14:00
+                                elif norm_key in core.ADELANTADOS_TARDE:
+                                    r["adelantado_tipo"] = "tarde"    # 16:30-17:00
+                                else:
+                                    r["adelantado_tipo"] = "A"
+
+                            # Gallego
+                            r["es_gallego"] = norm_key in core.GALLEGOS
+
+                            # mercancia_ok individual (para no-aculados; aculados se recalcula abajo)
+                            if min_pales is not None:
+                                r["mercancia_ok"] = numsup >= min_pales
+                    except Exception:
+                        r["numsup_count"] = 0
+
                     r["fecha"] = fecha_b2
 
-                # Viajes combinados: sumar numsup_count por viaje_n
+                # Viajes combinados: sumar numsup_count por viaje_n (solo aculados activos)
                 from collections import defaultdict
                 viaje_counts: dict = defaultdict(int)
                 viaje_rows: dict = defaultdict(list)
@@ -177,7 +186,6 @@ class Api:
                             viaje_rows[n].append(r)
                 for n, group in viaje_rows.items():
                     combined = viaje_counts[n]
-                    # Umbral: máximo de los mínimos del grupo (más restrictivo)
                     min_vals = [g.get("min_pales") for g in group if g.get("min_pales") is not None]
                     threshold = max(min_vals) if min_vals else 25
                     ok = combined >= threshold
