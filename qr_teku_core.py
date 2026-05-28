@@ -727,11 +727,19 @@ def get_min_pales(catcli: str, tipo_camion: str) -> "int | None":
     return None  # express, cepsa y demás: sin mínimo
 
 
-def odbc_lookup_touliv1(cod_cli: str, codact: int = 101) -> "tuple[int | None, str]":
+def get_ideal_pales(catcli: str) -> "int | None":
+    """Valor ideal de pales para carga completa. None = sin objetivo definido."""
+    cat = get_categoria_tipo(catcli)
+    if cat == "hiper":
+        return 40
+    return None
+
+
+def odbc_lookup_touliv1(cod_cli: str, codact: str = "101") -> "tuple[int | None, str]":
     """
-    Busca TOULIV1 y CATCLI en FGE50STO.GECLI2 por CODCLI y CODACT.
-    - Ambiente:     codact=101
-    - Refrigerado:  codact=3 (003)
+    Busca TOULIV1 y CATCLI en FGE50STO.GECLI2 por CODCLI y CODACT (campo CHAR).
+    - Ambiente:     codact='101'
+    - Refrigerado:  codact='003'
     Devuelve (touliv1: int|None, catcli: str). Cachea por (codcli, codact).
     """
     key = _to_codcli_key(cod_cli)

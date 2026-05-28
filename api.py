@@ -127,7 +127,7 @@ class Api:
                         cod_centro = r.get("cod_centro", "")
                         tipo_viaje = r.get("tipo_viaje", "ambiente")
                         es_ambiente = tipo_viaje == "ambiente"
-                        codact_gecli2 = 101 if es_ambiente else 3
+                        codact_gecli2 = "101" if es_ambiente else "003"
 
                         if cod_centro:
                             touliv1, catcli = core.odbc_lookup_touliv1(cod_centro, codact=codact_gecli2)
@@ -137,6 +137,7 @@ class Api:
                             r["categoria_tipo"] = categoria_tipo
                             min_pales = core.get_min_pales(catcli, r.get("tipo", ""))
                             r["min_pales"] = min_pales
+                            r["ideal_pales"] = core.get_ideal_pales(catcli)
 
                             if touliv1 is None:
                                 try:
