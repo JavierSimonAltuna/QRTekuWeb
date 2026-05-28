@@ -11,6 +11,7 @@ const QueuePanel = ({ pushToast }) => {
   });
   const [activeTab, setActiveTab] = useState("cola");
   const [reassignFor, setReassignFor] = useState(null);
+  const [helperMenuFor, setHelperMenuFor] = useState(null);
   const [search, setSearch] = useState("");
   const [showOdbc, setShowOdbc] = useState(false);
   const [odbcLog, setOdbcLog] = useState([]);
@@ -49,6 +50,25 @@ const QueuePanel = ({ pushToast }) => {
   const handleForceQueued = async (id) => {
     const r = await window.api.call("queue_force_queued", id);
     if (r.ok) { pushToast("Priorizada a la cola", "success"); refresh(); setActiveTab("cola"); }
+    else pushToast(r.error || "Error", "error");
+  };
+
+  const handleToggleBlock = async (id, blocked) => {
+    const method = blocked ? "queue_unblock" : "queue_block";
+    const r = await window.api.call(method, id);
+    if (r.ok) { pushToast(blocked ? "Carga desbloqueada" : "Carga bloqueada", "info"); refresh(); }
+    else pushToast(r.error || "Error", "error");
+  };
+
+  const handleAssignHelper = async (id, loaderId) => {
+    const r = await window.api.call("queue_assign_helper", id, loaderId);
+    if (r.ok) { pushToast("Ayudante asignado", "success"); refresh(); setHelperMenuFor(null); }
+    else pushToast(r.error || "Error", "error");
+  };
+
+  const handleRemoveHelper = async (id) => {
+    const r = await window.api.call("queue_remove_helper", id);
+    if (r.ok) { pushToast("Ayudante eliminado", "info"); refresh(); }
     else pushToast(r.error || "Error", "error");
   };
 
@@ -216,6 +236,7 @@ const QueuePanel = ({ pushToast }) => {
                   position={i + 1}
                   loaders={snap.loaders}
                   onToggleUrgent={() => handleUrgent(it.id, it.urgente)}
+                  onToggleBlock={() => handleToggleBlock(it.id, it.blocked)}
                   onRemove={() => handleRemove(it.id)}
                   onReassign={(loaderId) => handleReassign(it.id, loaderId)}
                   showReassignMenu={reassignFor === it.id}
@@ -244,11 +265,16 @@ const QueuePanel = ({ pushToast }) => {
                   key={it.id}
                   item={it}
                   loader={loaderById(it.assigned_to)}
+                  helper={it.helper_id ? loaderById(it.helper_id) : null}
                   loaders={snap.loaders}
                   onReassign={(loaderId) => handleReassign(it.id, loaderId)}
                   onRemove={() => handleRemove(it.id)}
                   showReassignMenu={reassignFor === it.id}
                   onOpenReassign={() => setReassignFor(reassignFor === it.id ? null : it.id)}
+                  onAssignHelper={(loaderId) => handleAssignHelper(it.id, loaderId)}
+                  onRemoveHelper={() => handleRemoveHelper(it.id)}
+                  showHelperMenu={helperMenuFor === it.id}
+                  onOpenHelperMenu={() => setHelperMenuFor(helperMenuFor === it.id ? null : it.id)}
                 />
               ))}
             </div>
@@ -262,7 +288,7 @@ const QueuePanel = ({ pushToast }) => {
             </div>
             <div style={QS.list}>
               {snap.loaders.map((l) => {
-                const current = snap.assigned.find((a) => a.assigned_to === l.id);
+                const current = snap.assigned.find((a) => a.assigned_to === l.id || a.helper_id === l.id);
                 return (
                   <LoaderCard key={l.id} loader={l} current={current} />
                 );
@@ -448,25 +474,35 @@ const ComboBadge = () => (
   </span>
 );
 
-const QueueCard = ({ item, position, loaders, onToggleUrgent, onRemove, onReassign, showReassignMenu, onOpenReassign, onSendToPendingMerch, onSetComment }) => {
+const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onRemove, onReassign, showReassignMenu, onOpenReassign, onSendToPendingMerch, onSetComment }) => {
   const [showCommentInput, setShowCommentInput] = React.useState(false);
   const [commentDraft, setCommentDraft] = React.useState(item.comment || "");
   const saveComment = () => { onSetComment(commentDraft.trim()); setShowCommentInput(false); };
   return (
   <div style={{
     ...QS.card,
-    borderLeft: item.urgente ? "3px solid #dc2626" : "3px solid transparent",
+    borderLeft: item.urgente ? "3px solid #dc2626" : item.blocked ? "3px solid #f59e0b" : "3px solid transparent",
+    opacity: item.blocked ? 0.75 : 1,
   }}>
     <div style={QS.cardHead}>
       <div style={QS.cardLeft}>
         <span style={QS.cardPos}>{String(position).padStart(2, "0")}</span>
         <span style={QS.cardTicket}>{item.id}</span>
         {item.is_combined && <ComboBadge />}
+        {item.blocked && (
+          <span style={{ fontSize: 9, fontWeight: 700, background: "#fef3c7", color: "#d97706", padding: "2px 6px", borderRadius: 999, letterSpacing: 0.5 }}>
+            🔒 BLOQUEADA
+          </span>
+        )}
       </div>
       <div style={QS.cardRight}>
         <button onClick={onToggleUrgent} title={item.urgente ? "Quitar urgencia" : "Marcar urgente"}
           style={{ ...QS.iconBtn, color: item.urgente ? "#dc2626" : "#a8a29e" }}>
           <IconBolt size={12} />
+        </button>
+        <button onClick={onToggleBlock} title={item.blocked ? "Desbloquear carga" : "Bloquear carga (no asignar automáticamente)"}
+          style={{ ...QS.iconBtn, color: item.blocked ? "#d97706" : "#a8a29e", fontSize: 12 }}>
+          {item.blocked ? "🔓" : "🔒"}
         </button>
         <button onClick={onOpenReassign} title="Asignar manualmente"
           style={{ ...QS.iconBtn, color: showReassignMenu ? "#1c1917" : "#a8a29e" }}>
@@ -565,7 +601,7 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onRemove, onReassi
   );
 };
 
-const AssignedCard = ({ item, loader, loaders, onReassign, onRemove, showReassignMenu, onOpenReassign }) => (
+const AssignedCard = ({ item, loader, helper, loaders, onReassign, onRemove, showReassignMenu, onOpenReassign, onAssignHelper, onRemoveHelper, showHelperMenu, onOpenHelperMenu }) => (
   <div style={{ ...QS.card, background: "#eff6ff", borderLeft: "3px solid #0ea5e9" }}>
     <div style={QS.cardHead}>
       <div style={QS.cardLeft}>
@@ -575,8 +611,20 @@ const AssignedCard = ({ item, loader, loaders, onReassign, onRemove, showReassig
           <IconTruck size={11} />
           {loader?.id || item.assigned_to} · {loader?.name || "?"}
         </span>
+        {helper && (
+          <span style={{ ...QS.assignedBy, background: "#dcfce7", color: "#166534" }}>
+            +{helper.id} · {helper.name}
+          </span>
+        )}
       </div>
       <div style={QS.cardRight}>
+        <button
+          onClick={onOpenHelperMenu}
+          title={item.helper_id ? "Gestionar ayudante" : "Asignar segundo cargador"}
+          style={{ ...QS.iconBtn, color: item.helper_id ? "#166534" : "#a8a29e", fontSize: 13 }}
+        >
+          👤+
+        </button>
         <button onClick={onOpenReassign} title="Reasignar a otro cargador" style={QS.iconBtn}>
           <IconRefresh size={12} />
         </button>
@@ -597,6 +645,37 @@ const AssignedCard = ({ item, loader, loaders, onReassign, onRemove, showReassig
         <Meta label="Asignada" value={fmtT(item.assigned_at)} />
       </div>
     </div>
+    {showHelperMenu && (
+      <div style={QS.reassignMenu}>
+        <div style={QS.reassignHint}>
+          {item.helper_id ? "Ayudante asignado:" : "Asignar ayudante:"}
+        </div>
+        {item.helper_id ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 6 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>
+              {helper?.id || item.helper_id} · {helper?.name || "?"}
+            </span>
+            <span style={{ flex: 1 }} />
+            <button
+              onClick={onRemoveHelper}
+              style={{ fontSize: 11, padding: "3px 8px", background: "#fff", border: "1px solid #fecaca", borderRadius: 4, color: "#dc2626", cursor: "pointer", fontFamily: "inherit" }}
+            >
+              Quitar
+            </button>
+          </div>
+        ) : (
+          loaders.filter((l) => l.active && l.id !== item.assigned_to).map((l) => (
+            <button key={l.id} onClick={() => onAssignHelper(l.id)} style={QS.reassignOpt}>
+              <span style={{ ...QS.reassignDot, background: "#22c55e" }} />
+              <span style={{ fontWeight: 600 }}>{l.id}</span>
+              <span style={{ color: "#a8a29e", marginLeft: 4 }}>· {l.name}</span>
+              <span style={{ flex: 1 }} />
+              <span style={QS.reassignMuelle}>M{(l.muelle_actual || "—").padStart(2, "0")}</span>
+            </button>
+          ))
+        )}
+      </div>
+    )}
     {showReassignMenu && (
       <div style={QS.reassignMenu}>
         <div style={QS.reassignHint}>Reasignar a:</div>

@@ -38,6 +38,10 @@ ALLOWED_METHODS = {
     "queue_reset_done",
     "queue_reset_queued",
     "queue_update_ruta",
+    "queue_block",
+    "queue_unblock",
+    "queue_assign_helper",
+    "queue_remove_helper",
     # Diagnóstico
     "get_odbc_diagnostics",
     # Útiles desde móvil (lectura)

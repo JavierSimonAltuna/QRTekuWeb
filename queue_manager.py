@@ -279,6 +279,8 @@ class QueueManager:
             "touliv1": row.get("touliv1"),
             "ruta_carga": row.get("ruta_carga"),
             "comment": "",
+            "blocked": False,
+            "helper_id": None,
         }
 
     @staticmethod
@@ -336,7 +338,7 @@ class QueueManager:
             if not loader:
                 return None
             muelle_loader = loader.get("muelle_actual", "00")
-            pool = [it for it in self._items if it["status"] == "queued"]
+            pool = [it for it in self._items if it["status"] == "queued" and not it.get("blocked")]
             if not pool:
                 return None
             # Ordenamos: (no-urgente=1, urgente=0)  → urgentes primero
@@ -354,18 +356,22 @@ class QueueManager:
             return chosen
 
     def get_current_for(self, loader_id: str) -> Optional[dict]:
-        """Devuelve la asignación activa del cargador, sin asignar una nueva."""
+        """Devuelve la asignación activa del cargador (primario o ayudante), sin asignar una nueva."""
         with self._lock:
             for it in self._items:
-                if it["status"] == "assigned" and it["assigned_to"] == loader_id:
+                if it["status"] == "assigned" and (
+                    it["assigned_to"] == loader_id or it.get("helper_id") == loader_id
+                ):
                     return it
             return None
 
     def finish(self, item_id: str, loader_id: str) -> dict:
-        """Marca como completada y actualiza muelle_actual del cargador."""
+        """Marca como completada. Puede marcarla tanto el cargador primario como el ayudante."""
         with self._lock:
             for it in self._items:
-                if it["id"] == item_id and it["assigned_to"] == loader_id:
+                if it["id"] == item_id and (
+                    it["assigned_to"] == loader_id or it.get("helper_id") == loader_id
+                ):
                     it["status"] = "done"
                     it["finished_at"] = datetime.now().isoformat(timespec="seconds")
                     it["completed_muelle"] = it["muelle"]
@@ -414,6 +420,46 @@ class QueueManager:
             for it in self._items:
                 if it["id"] == item_id:
                     it["urgente"] = bool(urgente)
+                    self._save()
+                    return {"ok": True}
+            return {"ok": False, "error": "No encontrado"}
+
+    def block_item(self, item_id: str) -> dict:
+        """Bloquea un item de la cola para que no sea asignado automáticamente."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id and it["status"] == "queued":
+                    it["blocked"] = True
+                    self._save()
+                    return {"ok": True}
+            return {"ok": False, "error": "No encontrado o no está en cola"}
+
+    def unblock_item(self, item_id: str) -> dict:
+        """Desbloquea un item para que vuelva a ser elegible para asignación."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id and it["status"] == "queued":
+                    it["blocked"] = False
+                    self._save()
+                    return {"ok": True}
+            return {"ok": False, "error": "No encontrado o no está en cola"}
+
+    def assign_helper(self, item_id: str, helper_loader_id: str) -> dict:
+        """Asigna un segundo cargador como ayudante de una carga ya asignada."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id and it["status"] == "assigned":
+                    it["helper_id"] = helper_loader_id
+                    self._save()
+                    return {"ok": True, "item": it}
+            return {"ok": False, "error": "No encontrado o no está asignada"}
+
+    def remove_helper(self, item_id: str) -> dict:
+        """Elimina el ayudante de una carga."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id:
+                    it["helper_id"] = None
                     self._save()
                     return {"ok": True}
             return {"ok": False, "error": "No encontrado"}
@@ -469,6 +515,7 @@ class QueueManager:
                 self._parse_time(it["hora_salida"]),
             ))
             pending_merch.sort(key=lambda it: self._parse_time(it.get("hora_salida", "")))
+            blocked_count = sum(1 for it in queued if it.get("blocked"))
             return {
                 "queued": queued,
                 "assigned": assigned,
@@ -480,6 +527,7 @@ class QueueManager:
                     "assigned": len(assigned),
                     "done": len(done),
                     "pending_merch": len(pending_merch),
+                    "blocked": blocked_count,
                 },
             }
 

@@ -417,6 +417,34 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def queue_block(self, item_id: str) -> dict:
+        """Bloquea un item de la cola para que no sea asignado automáticamente."""
+        try:
+            return queue_manager.get_manager().block_item(item_id)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def queue_unblock(self, item_id: str) -> dict:
+        """Desbloquea un item bloqueado."""
+        try:
+            return queue_manager.get_manager().unblock_item(item_id)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def queue_assign_helper(self, item_id: str, helper_loader_id: str) -> dict:
+        """Asigna un segundo cargador como ayudante de una carga en curso."""
+        try:
+            return queue_manager.get_manager().assign_helper(item_id, helper_loader_id)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def queue_remove_helper(self, item_id: str) -> dict:
+        """Elimina el ayudante de una carga en curso."""
+        try:
+            return queue_manager.get_manager().remove_helper(item_id)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def queue_send_to_pending_merch(self, item_id: str) -> dict:
         """Mueve un item de la cola a Sin mercancía."""
         try:
