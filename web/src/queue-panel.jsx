@@ -19,6 +19,7 @@ const QueuePanel = ({ pushToast }) => {
   const [search, setSearch] = useState("");
   const [showOdbc, setShowOdbc] = useState(false);
   const [odbcLog, setOdbcLog] = useState([]);
+  const [loaderForm, setLoaderForm] = useState(null); // null | {id,name,pin,queue_type,isNew}
 
   const refresh = useCallback(async () => {
     try {
@@ -92,6 +93,28 @@ const QueuePanel = ({ pushToast }) => {
     const r = await window.api.call("get_odbc_diagnostics");
     if (r.ok) setOdbcLog(r.log || []);
     setShowOdbc(true);
+  };
+
+  const openNewLoader = (defaultType = "ambiente") =>
+    setLoaderForm({ id: "", name: "", pin: "", queue_type: defaultType, isNew: true });
+
+  const openEditLoader = (l) =>
+    setLoaderForm({ id: l.id, name: l.name, pin: l.pin, queue_type: l.queue_type || "ambiente", isNew: false });
+
+  const handleSaveLoader = async () => {
+    if (!loaderForm) return;
+    const r = await window.api.call("loader_upsert", loaderForm.id, loaderForm.name, loaderForm.pin, loaderForm.queue_type);
+    if (r.ok) {
+      pushToast(loaderForm.isNew ? "Cargador añadido" : "Cargador actualizado", "success");
+      setLoaderForm(null); refresh();
+    } else pushToast(r.error || "Error", "error");
+  };
+
+  const handleRemoveLoader = async (loaderId) => {
+    if (!confirm(`¿Eliminar cargador ${loaderId}?`)) return;
+    const r = await window.api.call("loader_remove", loaderId);
+    if (r.ok) { pushToast("Cargador eliminado", "info"); refresh(); }
+    else pushToast(r.error || "Error", "error");
   };
 
   const handleRefreshNumsup = async (item_id, ruta_carga) => {
@@ -311,13 +334,19 @@ const QueuePanel = ({ pushToast }) => {
           <section style={QS.col}>
             <div style={QS.colHead}>
               <span style={QS.colTitle}>Cargadores</span>
-              <span style={QS.colCount}>{ambLoaders.filter((l) => l.active).length}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={QS.colCount}>{ambLoaders.filter((l) => l.active).length}</span>
+                <button onClick={() => openNewLoader("ambiente")} style={QS.addLoaderBtn} title="Añadir cargador ambiente">+ Cargador</button>
+              </div>
             </div>
             <div style={QS.list}>
               {ambLoaders.map((l) => {
                 const current = (snap.assigned||[]).find((a) => a.assigned_to === l.id || a.helper_id === l.id);
                 return (
-                  <LoaderCard key={l.id} loader={l} current={current} />
+                  <LoaderCard key={l.id} loader={l} current={current}
+                    onEdit={() => openEditLoader(l)}
+                    onRemove={() => handleRemoveLoader(l.id)}
+                  />
                 );
               })}
             </div>
@@ -489,14 +518,20 @@ const QueuePanel = ({ pushToast }) => {
           <section style={QS.col}>
             <div style={QS.colHead}>
               <span style={QS.colTitle}>❄ Cargadores refri</span>
-              <span style={QS.colCount}>{refriLoaders.filter(l => l.active).length}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={QS.colCount}>{refriLoaders.filter(l => l.active).length}</span>
+                <button onClick={() => openNewLoader("refrigerado")} style={{ ...QS.addLoaderBtn, background: "#dbeafe", color: "#0c4a6e", borderColor: "#bfdbfe" }} title="Añadir cargador refrigerado">+ Cargador</button>
+              </div>
             </div>
             <div style={QS.list}>
               {refriLoaders.length === 0 ? (
-                <EmptyMini label="Sin cargadores refri" hint="Añade cargadores con queue_type='refrigerado' desde Tweaks" />
+                <EmptyMini label="Sin cargadores refri" hint='Pulsa "+ Cargador" para añadir un cargador de refrigerado' />
               ) : refriLoaders.map((l) => {
                 const current = (snap.assigned_refr||[]).find(a => a.assigned_to === l.id || a.helper_id === l.id);
-                return <LoaderCard key={l.id} loader={l} current={current} />;
+                return <LoaderCard key={l.id} loader={l} current={current}
+                  onEdit={() => openEditLoader(l)}
+                  onRemove={() => handleRemoveLoader(l.id)}
+                />;
               })}
             </div>
             {snap.done.filter(it => it.queue_type === "refrigerado").length > 0 && (
@@ -561,6 +596,16 @@ const QueuePanel = ({ pushToast }) => {
       {/* ─── Modal diagnóstico ODBC ─── */}
       {showOdbc && (
         <OdbcModal log={odbcLog} onClose={() => setShowOdbc(false)} />
+      )}
+
+      {/* ─── Modal gestión de cargadores ─── */}
+      {loaderForm && (
+        <LoaderFormModal
+          form={loaderForm}
+          onChange={(f) => setLoaderForm(f)}
+          onSave={handleSaveLoader}
+          onClose={() => setLoaderForm(null)}
+        />
       )}
     </div>
   );
@@ -632,6 +677,88 @@ const OdbcModal = ({ log, onClose }) => (
     </div>
   </div>
 );
+
+// ───────────────────────────────────────────────────────────────
+// Modal gestión de cargadores
+// ───────────────────────────────────────────────────────────────
+const LoaderFormModal = ({ form, onChange, onSave, onClose }) => {
+  const set = (k, v) => onChange({ ...form, [k]: v });
+  const isRefri = form.queue_type === "refrigerado";
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", borderRadius: 12, width: 400, boxShadow: "0 20px 60px rgba(0,0,0,0.25)", overflow: "hidden" }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: "1px solid #e7e5e4" }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#1c1917" }}>
+            {form.isNew ? "Nuevo cargador" : `Editar ${form.id}`}
+          </span>
+          <button onClick={onClose} style={{ background: "transparent", border: "none", fontSize: 18, color: "#a8a29e", cursor: "pointer" }}>✕</button>
+        </div>
+        {/* Formulario */}
+        <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Tipo ☼/❄ */}
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.8, color: "#a8a29e", textTransform: "uppercase", marginBottom: 8 }}>Tipo de cola</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => set("queue_type", "ambiente")}
+                style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: `2px solid ${!isRefri ? "#f97316" : "#e7e5e4"}`, background: !isRefri ? "#fff7ed" : "#fafaf9", color: !isRefri ? "#9a3412" : "#78716c", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}
+              >☼ AMBIENTE</button>
+              <button
+                onClick={() => set("queue_type", "refrigerado")}
+                style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: `2px solid ${isRefri ? "#0ea5e9" : "#e7e5e4"}`, background: isRefri ? "#dbeafe" : "#fafaf9", color: isRefri ? "#0c4a6e" : "#78716c", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}
+              >❄ REFRIGERADO</button>
+            </div>
+          </div>
+          {/* ID */}
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.8, color: "#a8a29e", textTransform: "uppercase" }}>ID</label>
+            <input
+              type="text"
+              value={form.id}
+              onChange={(e) => set("id", e.target.value.toUpperCase())}
+              placeholder="L01, R01…"
+              disabled={!form.isNew}
+              style={{ display: "block", width: "100%", marginTop: 5, padding: "8px 10px", border: "1px solid #e7e5e4", borderRadius: 6, fontSize: 13, fontFamily: "inherit", color: "#1c1917", background: form.isNew ? "#fff" : "#fafaf9", boxSizing: "border-box" }}
+            />
+          </div>
+          {/* Nombre */}
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.8, color: "#a8a29e", textTransform: "uppercase" }}>Nombre</label>
+            <input
+              type="text"
+              value={form.name}
+              onChange={(e) => set("name", e.target.value)}
+              placeholder="Juan García"
+              style={{ display: "block", width: "100%", marginTop: 5, padding: "8px 10px", border: "1px solid #e7e5e4", borderRadius: 6, fontSize: 13, fontFamily: "inherit", color: "#1c1917", background: "#fff", boxSizing: "border-box" }}
+            />
+          </div>
+          {/* PIN */}
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.8, color: "#a8a29e", textTransform: "uppercase" }}>PIN</label>
+            <input
+              type="text"
+              value={form.pin}
+              onChange={(e) => set("pin", e.target.value)}
+              placeholder="1234"
+              maxLength={8}
+              style={{ display: "block", width: "100%", marginTop: 5, padding: "8px 10px", border: "1px solid #e7e5e4", borderRadius: 6, fontSize: 13, fontFamily: "ui-monospace, monospace", color: "#1c1917", background: "#fff", boxSizing: "border-box" }}
+            />
+          </div>
+          {/* Guardar */}
+          <button
+            onClick={onSave}
+            disabled={!form.id || !form.name || !form.pin}
+            style={{ padding: "10px 0", borderRadius: 8, background: !form.id || !form.name || !form.pin ? "#e7e5e4" : (isRefri ? "#0ea5e9" : "#f97316"), color: !form.id || !form.name || !form.pin ? "#a8a29e" : "#fff", border: "none", fontSize: 13, fontWeight: 700, cursor: !form.id || !form.name || !form.pin ? "not-allowed" : "pointer", fontFamily: "inherit" }}
+          >
+            {form.isNew ? "Añadir cargador" : "Guardar cambios"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // ───────────────────────────────────────────────────────────────
 // Tarjetas
@@ -974,23 +1101,34 @@ const PendingMerchCard = ({ item, onRemove, onRefreshNumsup }) => {
   );
 };
 
-const LoaderCard = ({ loader, current }) => (
+const LoaderCard = ({ loader, current, onEdit, onRemove }) => (
   <div style={QS.loaderCard}>
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
       <span style={{
         width: 10, height: 10, borderRadius: "50%",
         background: current ? "#0ea5e9" : (loader.active ? "#22c55e" : "#a8a29e"),
         boxShadow: current ? "0 0 0 4px rgba(14,165,233,0.18)" : "0 0 0 4px rgba(34,197,94,0.12)",
+        flexShrink: 0,
       }} />
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "#1c1917" }}>
-          {loader.id} <span style={{ color: "#a8a29e", fontWeight: 500 }}>· {loader.name}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#1c1917", display: "flex", alignItems: "center", gap: 6 }}>
+          {loader.id}
+          <span style={{ color: "#a8a29e", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>· {loader.name}</span>
+          <span style={{ fontSize: 10, padding: "1px 5px", borderRadius: 999, background: loader.queue_type === "refrigerado" ? "#dbeafe" : "#ffedd5", color: loader.queue_type === "refrigerado" ? "#0c4a6e" : "#9a3412", fontWeight: 700, flexShrink: 0 }}>
+            {loader.queue_type === "refrigerado" ? "❄" : "☼"}
+          </span>
         </div>
         <div style={{ fontSize: 10.5, color: "#78716c", marginTop: 2 }}>
           PIN: <code style={{ fontFamily: "ui-monospace, monospace", color: "#1c1917" }}>{loader.pin}</code>
           {" · Muelle "}<b>{(loader.muelle_actual || "—").padStart(2, "0")}</b>
         </div>
       </div>
+      {onEdit && (
+        <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+          <button onClick={onEdit} style={{ ...QS.iconBtn, color: "#78716c", fontSize: 12 }} title="Editar cargador">✎</button>
+          <button onClick={onRemove} style={{ ...QS.iconBtn, color: "#dc2626", fontSize: 12 }} title="Eliminar cargador">🗑</button>
+        </div>
+      )}
     </div>
     {current ? (
       <div style={QS.loaderCurrent}>
@@ -1104,6 +1242,7 @@ const QS = {
   reassignDot: { width: 7, height: 7, borderRadius: "50%", background: "#22c55e" },
   reassignMuelle: { fontSize: 10, color: "#a8a29e", fontFamily: "ui-monospace, monospace" },
 
+  addLoaderBtn: { fontSize: 10.5, fontWeight: 700, padding: "3px 9px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 6, color: "#15803d", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" },
   loaderCard: { background: "#fff", border: "1px solid #e7e5e4", borderRadius: 8, padding: 12 },
   loaderCurrent: { fontSize: 11, color: "#0c4a6e", background: "#dbeafe", padding: "5px 8px", borderRadius: 4, marginTop: 8, fontWeight: 600, fontFamily: "ui-monospace, monospace", letterSpacing: 0.2 },
 

@@ -568,6 +568,32 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def loader_upsert(self, loader_id: str, name: str, pin: str, queue_type: str = "ambiente") -> dict:
+        """Crear o actualizar un cargador (supervisor)."""
+        try:
+            loader_id = str(loader_id).strip().upper()
+            name = str(name).strip()
+            pin = str(pin).strip()
+            if not loader_id or not name or not pin:
+                return {"ok": False, "error": "ID, nombre y PIN son obligatorios"}
+            if queue_type not in ("ambiente", "refrigerado"):
+                queue_type = "ambiente"
+            mgr = queue_manager.get_manager()
+            return mgr.upsert_loader({
+                "id": loader_id, "name": name, "pin": pin,
+                "queue_type": queue_type, "active": True,
+            })
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def loader_remove(self, loader_id: str) -> dict:
+        """Eliminar un cargador (supervisor)."""
+        try:
+            mgr = queue_manager.get_manager()
+            return mgr.remove_loader(str(loader_id).strip().upper())
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def get_odbc_diagnostics(self) -> dict:
         """Devuelve el log de operaciones ODBC recientes para diagnóstico."""
         try:

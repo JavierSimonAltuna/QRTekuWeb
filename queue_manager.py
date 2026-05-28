@@ -582,6 +582,15 @@ class QueueManager:
             self._save_loaders()
             return {"ok": True, "loaders": self._loaders}
 
+    def remove_loader(self, loader_id: str) -> dict:
+        with self._lock:
+            before = len(self._loaders)
+            self._loaders = [l for l in self._loaders if l["id"] != loader_id]
+            if len(self._loaders) == before:
+                return {"ok": False, "error": f"Cargador {loader_id} no encontrado"}
+            self._save_loaders()
+            return {"ok": True, "loaders": self._loaders}
+
     def reset_done(self) -> dict:
         """Borra los completados (por si el supervisor quiere limpiar el historial)."""
         with self._lock:

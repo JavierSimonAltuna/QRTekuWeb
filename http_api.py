@@ -44,6 +44,9 @@ ALLOWED_METHODS = {
     "queue_remove_helper",
     # Diagnóstico
     "get_odbc_diagnostics",
+    # Gestión de cargadores (supervisor)
+    "loader_upsert",
+    "loader_remove",
     # Útiles desde móvil (lectura)
     "app_info",
 }
