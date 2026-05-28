@@ -810,7 +810,7 @@ def odbc_count_gesupej(cod_cli: str, ambiente: bool = True) -> int:
     Cuenta pales validados en GESUPEJ por cliente (tiempo real, sin caché).
     - ambiente=True:  CODACT IN  ('001','007','101','107','201','207','300')
     - ambiente=False: CODACT NOT IN (mismos valores)
-    Siempre filtra ETASUP = 30 y CLILIV = cod_cliente normalizado 8 dígitos.
+    Siempre filtra ETASUP = 30, TYPSUP <> '3' y CLILIV = cod_cliente normalizado 8 dígitos.
     """
     key = _to_codcli_key(cod_cli)
     if not key or key == "00000000":
@@ -823,7 +823,7 @@ def odbc_count_gesupej(cod_cli: str, ambiente: bool = True) -> int:
         conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=5)
         cur = conn.cursor()
         cur.execute(
-            f"SELECT COUNT(*) FROM {TABLE_GESUPEJ} WHERE CLILIV = ? AND {codact_clause} AND ETASUP = 30",
+            f"SELECT COUNT(*) FROM {TABLE_GESUPEJ} WHERE CLILIV = ? AND {codact_clause} AND ETASUP = 30 AND TYPSUP <> '3'",
             key,
         )
         row = cur.fetchone()
