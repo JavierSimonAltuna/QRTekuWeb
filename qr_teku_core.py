@@ -29,6 +29,10 @@ ODBC_PWD = "infolog"
 TABLE_NAME   = "FGE50STO.GEZCAM"
 TABLE_GECLI2  = "FGE50STO.GECLI2"
 TABLE_GESUPE6 = "FGE50STO.GESUPE6"
+TABLE_GESUPEJ = "FGE50STO.GESUPEJ"
+
+# CODACT válidos para contar pales en GESUPEJ
+_GESUPEJ_CODACT = ("'101'", "'107'", "'001'", "'007'", "'201'", "'207'", "'300'")
 
 TABLE_CHF_PATH = r"C:\Users\QrCarga\TABLA CHF.xlsx"
 
@@ -638,33 +642,36 @@ def _to_codcli_key(cod_cli) -> str:
     return s
 
 
-def odbc_lookup_touliv1(cod_cli: str) -> "int | None":
+def odbc_lookup_touliv1(cod_cli: str) -> "tuple[int | None, str]":
     """
-    Busca TOULIV1 en FGE50STO.GECLI2 por CODCLI.
-    Devuelve el int o None si no se encuentra. Cachea resultados.
+    Busca TOULIV1 y CATCLI en FGE50STO.GECLI2 por CODCLI (CODACT=101).
+    Devuelve (touliv1: int|None, catcli: str). Cachea resultados.
     """
     key = _to_codcli_key(cod_cli)
     if not key or key == "00000000":
-        return None
+        return None, ""
     if key in _touliv1_cache:
         cached = _touliv1_cache[key]
-        _log_odbc("TOULIV1", key, "CACHE", cached)
-        return cached
+        _log_odbc("TOULIV1", key, "CACHE", cached[0] if isinstance(cached, tuple) else cached)
+        return cached if isinstance(cached, tuple) else (cached, "")
     result = None
+    catcli = ""
     try:
         import pyodbc
         conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=5)
         cur = conn.cursor()
         cur.execute(
-            f"SELECT TOULIV1 FROM {TABLE_GECLI2} WHERE CODCLI = ? AND CODACT = 101 FETCH FIRST 1 ROWS ONLY",
+            f"SELECT TOULIV1, CATCLI FROM {TABLE_GECLI2} WHERE CODCLI = ? AND CODACT = 101 FETCH FIRST 1 ROWS ONLY",
             key,
         )
         row = cur.fetchone()
-        if row and row[0] is not None:
-            try:
-                result = int(row[0])
-            except (ValueError, TypeError):
-                result = None
+        if row:
+            if row[0] is not None:
+                try:
+                    result = int(row[0])
+                except (ValueError, TypeError):
+                    result = None
+            catcli = str(row[1] or "").strip()
         cur.close()
         conn.close()
         if result is not None:
@@ -673,8 +680,8 @@ def odbc_lookup_touliv1(cod_cli: str) -> "int | None":
             _log_odbc("TOULIV1", key, "NOT_FOUND")
     except Exception as e:
         _log_odbc("TOULIV1", key, "ERROR", error=str(e))
-    _touliv1_cache[key] = result
-    return result
+    _touliv1_cache[key] = (result, catcli)
+    return result, catcli
 
 
 def odbc_count_gesupe6(ruta_carga: int) -> int:
@@ -699,6 +706,35 @@ def odbc_count_gesupe6(ruta_carga: int) -> int:
         return count
     except Exception as e:
         _log_odbc("GESUPE6", key, "ERROR", error=str(e))
+        return 0
+
+
+def odbc_count_gesupej(cod_cli: str) -> int:
+    """
+    Cuenta pales en GESUPEJ por código de cliente:
+    COUNT(*) WHERE CLILIV=cod_cli(8 dígitos) AND CODACT IN ('101','107','001','007','201','207','300').
+    Sin caché (tiempo real).
+    """
+    key = _to_codcli_key(cod_cli)
+    if not key or key == "00000000":
+        return 0
+    codact_in = ", ".join(_GESUPEJ_CODACT)
+    try:
+        import pyodbc
+        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=5)
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT COUNT(*) FROM {TABLE_GESUPEJ} WHERE CLILIV = ? AND CODACT IN ({codact_in})",
+            key,
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        count = int(row[0]) if row else 0
+        _log_odbc("GESUPEJ", key, "OK", count)
+        return count
+    except Exception as e:
+        _log_odbc("GESUPEJ", key, "ERROR", error=str(e))
         return 0
 
 

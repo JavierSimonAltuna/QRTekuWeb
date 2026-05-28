@@ -104,27 +104,25 @@ class Api:
                                     r["agencia"] = agencia or r.get("agencia", "")
                                 except Exception:
                                     pass
-                        # GESUPE6: buscar TOULIV1 en GECLI2 por CODCLI → contar pales
+                        # GECLI2 → TOULIV1 + CATCLI; GESUPEJ → contar pales por cliente
                         try:
                             cod_centro = r.get("cod_centro", "")
                             if cod_centro:
-                                # Lookup correcto: CODCLI → TOULIV1 en GECLI2
-                                touliv1 = core.odbc_lookup_touliv1(cod_centro)
+                                touliv1, catcli = core.odbc_lookup_touliv1(cod_centro)
+                                r["catcli"] = catcli
                                 if touliv1 is None:
-                                    # Fallback: intentar cod_centro como valor numérico directo
                                     try:
                                         touliv1 = int(float(cod_centro))
                                     except (ValueError, TypeError):
                                         touliv1 = None
                                 if touliv1 is not None:
-                                    # Col W = "A" → ruta_carga = TOULIV1 + 1
-                                    # En cualquier otro caso → TOULIV1 - 5
                                     col_w = str(r.get("col_w", "")).strip().upper()
                                     ruta_carga = int(touliv1) + 1 if col_w == "A" else int(touliv1) - 5
-                                    numsup = core.odbc_count_gesupe6(ruta_carga)
-                                    r["numsup_count"] = numsup
                                     r["touliv1"] = touliv1
                                     r["ruta_carga"] = ruta_carga
+                                # Conteo de pales: GESUPEJ filtrado por CLILIV + CODACT
+                                numsup = core.odbc_count_gesupej(cod_centro)
+                                r["numsup_count"] = numsup
                         except Exception:
                             r["numsup_count"] = 0
                     # Fecha para QR
