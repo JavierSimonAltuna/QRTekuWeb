@@ -145,6 +145,17 @@ class QueueManager:
                 for it in self._items
                 if it["status"] in active_statuses and it.get("is_combined")
             }
+            # Ya completados: nunca volver a encolar aunque el Excel no esté en verde
+            done_single: set = {
+                (it["viaje_n"], it["destino"])
+                for it in self._items
+                if it["status"] == "done" and not it.get("is_combined")
+            }
+            done_combined: set = {
+                it["viaje_n"]
+                for it in self._items
+                if it["status"] == "done" and it.get("is_combined")
+            }
             # Combinados añadidos en esta llamada (para deduplicar dentro del mismo lote)
             combined_seen: set = set()
 
@@ -158,6 +169,8 @@ class QueueManager:
 
                 if is_combined:
                     # Viaje combinado: un solo item por viaje_n
+                    if n in done_combined:
+                        continue
                     if n in present_combined:
                         existing = present_combined[n]
                         if existing["status"] == "pending_merch":
@@ -178,6 +191,8 @@ class QueueManager:
                 else:
                     # Viaje simple: clave (viaje_n, destino)
                     key = (n, r.get("destino", ""))
+                    if key in done_single:
+                        continue
                     if key in present_single:
                         existing = present_single[key]
                         if existing["status"] == "pending_merch":
@@ -581,6 +596,15 @@ class QueueManager:
                 self._loaders.append({**loader, "active": True})
             self._save_loaders()
             return {"ok": True, "loaders": self._loaders}
+
+    def update_item_fields(self, item_id: str, fields: dict) -> None:
+        """Actualiza campos concretos de un item en cola y persiste. Uso interno."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id:
+                    it.update(fields)
+                    self._save()
+                    return
 
     def remove_loader(self, loader_id: str) -> dict:
         with self._lock:

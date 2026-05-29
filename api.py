@@ -33,6 +33,7 @@ class Api:
         self._last_destino: str = ""
         self._last_precintos: list = []
         self._picker_open: bool = False
+        self._rows: list = []   # filas enriquecidas del último Excel cargado
 
     def set_window(self, window):
         self._window = window
@@ -222,6 +223,7 @@ class Api:
                 added = queue_manager.get_manager().auto_enqueue_from_rows(rows)
             except Exception:
                 pass
+            self._rows = rows  # guardar para releer precintos al asignar
             return {
                 "ok": True,
                 "rows": rows,
@@ -507,6 +509,43 @@ class Api:
             return {"ok": False, "error": str(e)}
 
     # ──────────────────────────────────────────────────────────────
+    # COLA BLEECKER — helpers internos
+    # ──────────────────────────────────────────────────────────────
+    def _refresh_precintos(self, item: dict) -> None:
+        """Actualiza precintos del item desde las filas del Excel en memoria.
+        Si los precintos cambiaron, regenera el QR y persiste el cambio."""
+        if not item or not self._rows:
+            return
+        viaje_n = str(item.get("viaje_n", "")).strip()
+        matching = [r for r in self._rows if str(r.get("n", "")).strip() == viaje_n]
+        if not matching:
+            return
+        fresh = []
+        for r in matching:
+            fresh.extend(r.get("precintos_data") or [])
+        current = item.get("precintos") or []
+        if fresh == current:
+            return
+        item["precintos"] = fresh
+        try:
+            payload = json.loads(item.get("qr_payload_compact") or "{}")
+            payload["P"] = fresh
+            compact = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+            png_bytes = core.make_qr_png(compact)
+            item["qr_png_b64"] = "data:image/png;base64," + base64.b64encode(png_bytes).decode()
+            item["qr_payload_compact"] = compact
+        except Exception:
+            pass
+        try:
+            queue_manager.get_manager().update_item_fields(item["id"], {
+                "precintos": item["precintos"],
+                "qr_png_b64": item.get("qr_png_b64", ""),
+                "qr_payload_compact": item.get("qr_payload_compact", ""),
+            })
+        except Exception:
+            pass
+
+    # ──────────────────────────────────────────────────────────────
     # COLA BLEECKER — Cargador
     # ──────────────────────────────────────────────────────────────
     def loader_login(self, pin: str) -> dict:
@@ -529,14 +568,18 @@ class Api:
             return {"ok": False, "error": str(e)}
 
     def loader_request_next(self, loader_id: str) -> dict:
-        """Pide la siguiente carga. Si ya tiene asignada, devuelve esa."""
+        """Pide la siguiente carga. Si ya tiene asignada, devuelve esa.
+        En ambos casos refresca los precintos desde el Excel en memoria."""
         try:
             mgr = queue_manager.get_manager()
             current = mgr.get_current_for(loader_id)
             if current:
+                self._refresh_precintos(current)
                 counts = mgr.snapshot()["counts"]
                 return {"ok": True, "item": current, "queued_count": counts["queued"], "already_assigned": True}
             item = mgr.pick_next_for(loader_id)
+            if item:
+                self._refresh_precintos(item)
             counts = mgr.snapshot()["counts"]
             return {"ok": True, "item": item, "queued_count": counts["queued"]}
         except Exception as e:
@@ -550,6 +593,8 @@ class Api:
             if not res.get("ok"):
                 return res
             next_item = mgr.pick_next_for(loader_id)
+            if next_item:
+                self._refresh_precintos(next_item)
             counts = mgr.snapshot()["counts"]
             return {
                 "ok": True,
