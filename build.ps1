@@ -11,10 +11,22 @@
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-# Generar icono si no existe
-if (-not (Test-Path "Pulso.ico")) {
+# Seleccionar icono: QRTeku.ico > Pulso.ico > generar con make_ico.py > sin icono
+$icoFile = $null
+if (Test-Path "QRTeku.ico") {
+    $icoFile = "QRTeku.ico"
+} elseif (Test-Path "Pulso.ico") {
+    $icoFile = "Pulso.ico"
+} elseif (Test-Path "make_ico.py") {
     Write-Host "Generando Pulso.ico..." -ForegroundColor Cyan
     python make_ico.py
+    if (Test-Path "Pulso.ico") { $icoFile = "Pulso.ico" }
+}
+
+if ($icoFile) {
+    Write-Host "Usando icono: $icoFile" -ForegroundColor Cyan
+} else {
+    Write-Host "AVISO: Sin icono encontrado, compilando sin icono." -ForegroundColor Yellow
 }
 
 # Limpiar builds previos
@@ -30,20 +42,23 @@ if (Test-Path "Pulso.spec") { Remove-Item -Force "Pulso.spec" }
 Write-Host ""
 Write-Host "Construyendo Pulso.exe..." -ForegroundColor Cyan
 
-python -m PyInstaller `
-    --name Pulso `
-    --onefile `
-    --windowed `
-    --icon="Pulso.ico" `
-    --add-data "web;web" `
-    --collect-all pywebview `
-    --hidden-import pyodbc `
-    --hidden-import barcode `
-    --hidden-import openpyxl `
-    --hidden-import xlrd `
-    --hidden-import tkinter `
-    --hidden-import tkinter.filedialog `
-    main.py
+$pyiArgs = @(
+    "--name", "Pulso",
+    "--onefile",
+    "--windowed",
+    "--add-data", "web;web",
+    "--collect-all", "pywebview",
+    "--hidden-import", "pyodbc",
+    "--hidden-import", "barcode",
+    "--hidden-import", "openpyxl",
+    "--hidden-import", "xlrd",
+    "--hidden-import", "tkinter",
+    "--hidden-import", "tkinter.filedialog"
+)
+if ($icoFile) { $pyiArgs += @("--icon", $icoFile) }
+$pyiArgs += "main.py"
+
+python -m PyInstaller @pyiArgs
 
 # Resultado
 Write-Host ""
