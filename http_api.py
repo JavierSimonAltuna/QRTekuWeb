@@ -22,6 +22,7 @@ ALLOWED_METHODS = {
     "loader_login",
     "loader_current",
     "loader_request_next",
+    "loader_refresh_precintos",
     "loader_finish",
     "loader_set_muelle",
     # Cargas (supervisor desde navegador)
