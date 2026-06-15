@@ -392,8 +392,8 @@ const QRTekuApp = () => {
             <span style={S.logoBar} />
           </div>
           <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: "#fafaf9", letterSpacing: -0.3 }}>PULSO</span>
-            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", letterSpacing: 0.3 }}>Garvasa · v3.2</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "#fafaf9", letterSpacing: -0.3 }}>PULSO 3.0</span>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", letterSpacing: 0.3 }}>Garvasa</span>
           </div>
           {hasFile && (
             <>
@@ -593,7 +593,7 @@ const QRTekuApp = () => {
       </div>
 
       {/* Tweaks */}
-      <TweaksPanel title="Tweaks · PULSO">
+      <TweaksPanel title="Tweaks · PULSO 3.0">
         <TweakSection label="Vista">
           <TweakToggle label="Tabla compacta"   value={tw.denseTable}     onChange={(v) => setTweak("denseTable", v)} />
           <TweakToggle label="Mostrar JSON"     value={tw.showJsonPanel}  onChange={(v) => setTweak("showJsonPanel", v)} />
