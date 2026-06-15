@@ -20,6 +20,7 @@ const QueuePanel = ({ pushToast }) => {
   const [showOdbc, setShowOdbc] = useState(false);
   const [odbcLog, setOdbcLog] = useState([]);
   const [loaderForm, setLoaderForm] = useState(null); // null | {id,name,pin,queue_type,isNew}
+  const [manualForm, setManualForm] = useState(null); // null | carga manual fuera de plan
 
   const refresh = useCallback(async () => {
     try {
@@ -117,6 +118,37 @@ const QueuePanel = ({ pushToast }) => {
     else pushToast(r.error || "Error", "error");
   };
 
+  const openManualCarga = (defaultType = "ambiente") => setManualForm({
+    destino: "", queue_type: defaultType, tractora: "", remolque: "",
+    muelle: "", playa: "", hora_salida: "", cam: "", cod_centro: "",
+    cif: "", agencia: "", urgente: false,
+  });
+
+  const handleSaveManual = async () => {
+    if (!manualForm) return;
+    const f = manualForm;
+    if (!f.destino.trim()) { pushToast("El destino es obligatorio", "error"); return; }
+    const row = {
+      destino: f.destino.trim().toUpperCase(),
+      queue_type: f.queue_type,
+      matriculas: `${f.tractora.trim().toUpperCase()}/${f.remolque.trim().toUpperCase()}`,
+      muelle: f.muelle.trim(),
+      playa: f.playa.trim(),
+      hora_salida: f.hora_salida.trim(),
+      orden: f.cam.trim(),
+      cod_centro: f.cod_centro.trim(),
+      cif: f.cif.trim(),
+      agencia: f.agencia.trim(),
+      tipo_viaje: f.queue_type,
+      mercancia_ok: true,
+    };
+    const r = await window.api.call("queue_enqueue_manual", row, f.urgente);
+    if (r.ok) {
+      pushToast(`Carga añadida a la cola · ${r.item.id}`, "success");
+      setManualForm(null); refresh();
+    } else pushToast(r.error || "Error", "error");
+  };
+
   const handleRefreshNumsup = async (item_id, ruta_carga) => {
     const r = await window.api.call("queue_update_ruta", item_id, String(ruta_carga));
     if (r.ok) {
@@ -183,6 +215,9 @@ const QueuePanel = ({ pushToast }) => {
           <StatBig label="Sin mercancía" value={isRefriTab ? (snap.counts.pending_merch_refr||0) : snap.counts.pending_merch} color="#d97706" />
         )}
         <div style={{ flex: 1 }} />
+        <button onClick={() => openManualCarga(isRefriTab ? "refrigerado" : "ambiente")} style={QS.addLoaderBtn} title="Añadir carga fuera del plan">
+          + Carga manual
+        </button>
         <button onClick={refresh} style={QS.refreshBtn} title="Refrescar">
           <IconRefresh size={14} />
           Refrescar
@@ -614,6 +649,16 @@ const QueuePanel = ({ pushToast }) => {
           onClose={() => setLoaderForm(null)}
         />
       )}
+
+      {/* ─── Modal carga manual fuera de plan ─── */}
+      {manualForm && (
+        <ManualCargaModal
+          form={manualForm}
+          onChange={(f) => setManualForm(f)}
+          onSave={handleSaveManual}
+          onClose={() => setManualForm(null)}
+        />
+      )}
     </div>
   );
 };
@@ -760,6 +805,94 @@ const LoaderFormModal = ({ form, onChange, onSave, onClose }) => {
             style={{ padding: "10px 0", borderRadius: 8, background: !form.id || !form.name || !form.pin ? "#e7e5e4" : (isRefri ? "#0ea5e9" : "#f97316"), color: !form.id || !form.name || !form.pin ? "#a8a29e" : "#fff", border: "none", fontSize: 13, fontWeight: 700, cursor: !form.id || !form.name || !form.pin ? "not-allowed" : "pointer", fontFamily: "inherit" }}
           >
             {form.isNew ? "Añadir cargador" : "Guardar cambios"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ───────────────────────────────────────────────────────────────
+// Modal carga manual fuera de plan
+// ───────────────────────────────────────────────────────────────
+const ManualCargaModal = ({ form, onChange, onSave, onClose }) => {
+  const set = (k, v) => onChange({ ...form, [k]: v });
+  const isRefri = form.queue_type === "refrigerado";
+  const fieldStyle = { display: "block", width: "100%", marginTop: 5, padding: "8px 10px", border: "1px solid #e7e5e4", borderRadius: 6, fontSize: 13, fontFamily: "inherit", color: "#1c1917", background: "#fff", boxSizing: "border-box" };
+  const labelStyle = { fontSize: 11, fontWeight: 700, letterSpacing: 0.8, color: "#a8a29e", textTransform: "uppercase" };
+  const Field = ({ label, k, placeholder, mono }) => (
+    <div>
+      <label style={labelStyle}>{label}</label>
+      <input
+        type="text"
+        value={form[k]}
+        onChange={(e) => set(k, e.target.value)}
+        placeholder={placeholder}
+        style={{ ...fieldStyle, ...(mono ? { fontFamily: "ui-monospace, monospace" } : {}) }}
+      />
+    </div>
+  );
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", borderRadius: 12, width: 460, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.25)", overflow: "hidden" }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: "1px solid #e7e5e4" }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#1c1917" }}>Carga fuera del plan</span>
+          <button onClick={onClose} style={{ background: "transparent", border: "none", fontSize: 18, color: "#a8a29e", cursor: "pointer" }}>✕</button>
+        </div>
+        {/* Formulario */}
+        <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: 14, overflowY: "auto" }}>
+          {/* Tipo ☼/❄ */}
+          <div>
+            <div style={{ ...labelStyle, marginBottom: 8 }}>Tipo de cola</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => set("queue_type", "ambiente")}
+                style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: `2px solid ${!isRefri ? "#f97316" : "#e7e5e4"}`, background: !isRefri ? "#fff7ed" : "#fafaf9", color: !isRefri ? "#9a3412" : "#78716c", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}
+              >☼ AMBIENTE</button>
+              <button
+                onClick={() => set("queue_type", "refrigerado")}
+                style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: `2px solid ${isRefri ? "#0ea5e9" : "#e7e5e4"}`, background: isRefri ? "#dbeafe" : "#fafaf9", color: isRefri ? "#0c4a6e" : "#78716c", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}
+              >❄ REFRIGERADO</button>
+            </div>
+          </div>
+
+          <Field label="Destino *" k="destino" placeholder="COMPOSTELA" />
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ flex: 1 }}><Field label="Tractora" k="tractora" placeholder="0805-MSG" mono /></div>
+            <div style={{ flex: 1 }}><Field label="Remolque" k="remolque" placeholder="R-0034-BCT" mono /></div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ flex: 1 }}><Field label="Muelle" k="muelle" placeholder="03" /></div>
+            <div style={{ flex: 1 }}><Field label="Playa" k="playa" placeholder="5" /></div>
+            <div style={{ flex: 1 }}><Field label="Salida" k="hora_salida" placeholder="23:45" /></div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ flex: 1 }}><Field label="Nº camión" k="cam" placeholder="002" /></div>
+            <div style={{ flex: 1 }}><Field label="Cliente" k="cod_centro" placeholder="0770" /></div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ flex: 1 }}><Field label="CIF" k="cif" placeholder="A39020805" mono /></div>
+            <div style={{ flex: 1 }}><Field label="Agencia" k="agencia" placeholder="BELINDA" /></div>
+          </div>
+
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#1c1917", cursor: "pointer" }}>
+            <input type="checkbox" checked={form.urgente} onChange={(e) => set("urgente", e.target.checked)} />
+            Marcar como urgente
+          </label>
+
+          {/* Guardar */}
+          <button
+            onClick={onSave}
+            disabled={!form.destino.trim()}
+            style={{ padding: "10px 0", borderRadius: 8, background: !form.destino.trim() ? "#e7e5e4" : (isRefri ? "#0ea5e9" : "#f97316"), color: !form.destino.trim() ? "#a8a29e" : "#fff", border: "none", fontSize: 13, fontWeight: 700, cursor: !form.destino.trim() ? "not-allowed" : "pointer", fontFamily: "inherit" }}
+          >
+            Añadir a la cola
           </button>
         </div>
       </div>

@@ -235,6 +235,11 @@ class QueueManager:
 
     def _build_item(self, row: dict, urgente: bool, source: str) -> dict:
         """Construye un item de cola con QR PNG ya renderizado."""
+        ticket_id = self._new_ticket()
+        # Viaje no presente en el plan de carga (añadido manualmente por el supervisor):
+        # usamos el ticket como identificador de viaje.
+        viaje_n = (row.get("n") or "").strip() or ticket_id
+
         # Payload del QR — solo T,R,N,D,C,E,P
         matriculas = (row.get("matriculas") or "").split("/")
         tractora = matriculas[0].strip().upper() if matriculas else ""
@@ -242,7 +247,7 @@ class QueueManager:
         payload = {
             "T": tractora,
             "R": remolque,
-            "N": (row.get("n") or "").strip().zfill(3),
+            "N": viaje_n.zfill(3),
             "D": row.get("fecha") or datetime.now().strftime("%Y%m%d"),
             "C": row.get("cif") or "",
             "E": row.get("agencia") or "",
@@ -255,10 +260,14 @@ class QueueManager:
         except Exception:
             qr_b64 = ""
 
-        # Tipo de carga: refrigerado si "REFR" en tipo o expedición
+        # Tipo de carga: refrigerado si "REFR" en tipo/expedición, o si la cola
+        # destino es "refrigerado" (carga fuera de plan añadida manualmente)
         tipo_raw = (row.get("tipo") or "").upper()
         exp_raw = (row.get("expedicion") or "").upper()
-        is_refr = "REFR" in tipo_raw or "FRIO" in tipo_raw or "REFR" in exp_raw
+        is_refr = (
+            "REFR" in tipo_raw or "FRIO" in tipo_raw or "REFR" in exp_raw
+            or row.get("queue_type") == "refrigerado"
+        )
 
         # Hora de salida: usamos expedicion si parece una hora, si no, derivamos de hora_acule+30min
         hora_salida = self._derive_salida(row)
@@ -267,8 +276,8 @@ class QueueManager:
         initial_status = "queued" if mercancia_ok else "pending_merch"
 
         return {
-            "id": self._new_ticket(),
-            "viaje_n": row.get("n", ""),
+            "id": ticket_id,
+            "viaje_n": viaje_n,
             "destino": row.get("destino", ""),
             "tractora": tractora,
             "remolque": remolque,
