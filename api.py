@@ -395,7 +395,21 @@ class Api:
     def queue_enqueue_manual(self, row: dict, urgente: bool = False) -> dict:
         """Añadir manualmente a la cola desde el botón del supervisor."""
         try:
-            item = queue_manager.get_manager().manual_enqueue(row or {}, urgente=bool(urgente))
+            row = dict(row or {})
+            # Si la fila aún no pasó por el enriquecido del Excel (no aculada),
+            # los pales disponibles (numsup_count/combined_count) pueden faltar.
+            # Los consultamos aquí para que la tarjeta de cola los muestre.
+            if row.get("numsup_count") is None and row.get("cod_centro"):
+                try:
+                    tipo_viaje = row.get("tipo_viaje", "ambiente")
+                    es_ambiente = tipo_viaje == "ambiente"
+                    numsup = core.odbc_count_gesupej(row["cod_centro"], ambiente=es_ambiente)
+                    row["numsup_count"] = numsup
+                    if row.get("combined_count") is None:
+                        row["combined_count"] = numsup
+                except Exception:
+                    pass
+            item = queue_manager.get_manager().manual_enqueue(row, urgente=bool(urgente))
             return {"ok": True, "item": item}
         except Exception as e:
             return {"ok": False, "error": str(e), "trace": traceback.format_exc()}
@@ -424,10 +438,11 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
-    def queue_reset_queued(self) -> dict:
-        """Borra todos los items pendientes (queued y pending_merch) para poder recargar el Excel."""
+    def queue_reset_queued(self, queue_type: str = None) -> dict:
+        """Borra los items pendientes (queued y pending_merch) para poder recargar el Excel.
+        Si se indica queue_type ('ambiente'/'refrigerado'), solo afecta a esa cola."""
         try:
-            return queue_manager.get_manager().reset_queued()
+            return queue_manager.get_manager().reset_queued(queue_type)
         except Exception as e:
             return {"ok": False, "error": str(e)}
 

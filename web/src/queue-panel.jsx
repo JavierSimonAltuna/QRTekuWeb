@@ -131,9 +131,10 @@ const QueuePanel = ({ pushToast }) => {
     if (r.ok) { pushToast("Histórico limpiado", "success"); refresh(); }
   };
 
-  const handleResetQueued = async () => {
-    if (!confirm("¿Vaciar la cola de pendientes?\nRecarga el Excel para volver a encolarlos.")) return;
-    const r = await window.api.call("queue_reset_queued");
+  const handleResetQueued = async (queueType) => {
+    const label = queueType === "refrigerado" ? "refrigerado" : "ambiente";
+    if (!confirm(`¿Vaciar la cola de pendientes (${label})?\nRecarga el Excel para volver a encolarlos.`)) return;
+    const r = await window.api.call("queue_reset_queued", queueType);
     if (r.ok) { pushToast(`Cola vaciada (${r.removed} eliminadas)`, "success"); refresh(); }
     else pushToast(r.error || "Error", "error");
   };
@@ -189,10 +190,16 @@ const QueuePanel = ({ pushToast }) => {
         <button onClick={handleOpenOdbc} style={QS.odbcBtn} title="Diagnóstico ODBC">
           ODBC
         </button>
-        {(snap.counts.queued + (snap.counts.pending_merch || 0)) > 0 && (
-          <button onClick={handleResetQueued} style={QS.clearBtn} title="Vaciar cola de pendientes">
+        {(isRefriTab
+          ? (snap.counts.queued_refr || 0) + (snap.counts.pending_merch_refr || 0)
+          : snap.counts.queued + (snap.counts.pending_merch || 0)) > 0 && (
+          <button
+            onClick={() => handleResetQueued(isRefriTab ? "refrigerado" : "ambiente")}
+            style={QS.clearBtn}
+            title={`Vaciar cola de pendientes (${isRefriTab ? "refrigerado" : "ambiente"})`}
+          >
             <IconTrash size={13} />
-            Vaciar cola
+            Vaciar cola {isRefriTab ? "refri" : "ambiente"}
           </button>
         )}
         {snap.counts.done > 0 && (
@@ -804,7 +811,7 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onR
         </button>
         <button onClick={onToggleBlock} title={item.blocked ? "Desbloquear carga" : "Bloquear carga (no asignar automáticamente)"}
           style={{ ...QS.iconBtn, color: item.blocked ? "#d97706" : "#a8a29e", fontSize: 12 }}>
-          {item.blocked ? "🔓" : "🔒"}
+          {item.blocked ? "🔒" : "🔓"}
         </button>
         <button onClick={onOpenReassign} title="Asignar manualmente"
           style={{ ...QS.iconBtn, color: showReassignMenu ? "#1c1917" : "#a8a29e" }}>
@@ -846,6 +853,7 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onR
         <Meta label="Muelle" value={(item.muelle || "—").padStart(2, "0")} />
         <Meta label="Playa" value={item.playa || "—"} />
         <Meta label="Salida" value={item.hora_salida || "—"} />
+        <Meta label="Camión" value={(item.cam || "—").toString()} />
         {item.cod_centro && <Meta label="Cliente" value={item.cod_centro} />}
         {(item.combined_count != null || item.numsup_count != null) && (
           <Meta

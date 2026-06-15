@@ -622,11 +622,18 @@ class QueueManager:
             self._save()
             return {"ok": True}
 
-    def reset_queued(self) -> dict:
-        """Borra los items pendientes (queued y pending_merch) para recargar el Excel."""
+    def reset_queued(self, queue_type: Optional[str] = None) -> dict:
+        """Borra los items pendientes (queued y pending_merch) para recargar el Excel.
+        Si se indica queue_type, solo afecta a esa cola (ambiente/refrigerado)."""
         with self._lock:
-            before = len([it for it in self._items if it["status"] in ("queued", "pending_merch")])
-            self._items = [it for it in self._items if it["status"] not in ("queued", "pending_merch")]
+            def _match(it):
+                if it["status"] not in ("queued", "pending_merch"):
+                    return False
+                if queue_type and it.get("queue_type", "ambiente") != queue_type:
+                    return False
+                return True
+            before = len([it for it in self._items if _match(it)])
+            self._items = [it for it in self._items if not _match(it)]
             self._save()
             return {"ok": True, "removed": before}
 

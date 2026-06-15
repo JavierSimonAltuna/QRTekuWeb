@@ -24,6 +24,8 @@ const LoaderApp = () => {
   });
   const [screen, setScreen] = useState(loader ? "loading_or_waiting" : "login");
   // assigned | waiting | confirming | completing | requesting
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
   const [item, setItem] = useState(null);
   const [queuedCount, setQueuedCount] = useState(0);
   const [completedInfo, setCompletedInfo] = useState(null);
@@ -46,6 +48,9 @@ const LoaderApp = () => {
 
   const pollCurrent = async () => {
     if (!loader) return;
+    // No interferir mientras el cargador está confirmando/finalizando una carga:
+    // sobreescribir la pantalla aquí cerraría el diálogo de confirmación.
+    if (screenRef.current === "confirming" || screenRef.current === "completing") return;
     try {
       const r = await window.api.call("loader_current", loader.id);
       if (r.ok) {
