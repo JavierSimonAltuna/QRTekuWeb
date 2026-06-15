@@ -528,7 +528,8 @@ class Api:
     # ──────────────────────────────────────────────────────────────
     def _refresh_precintos(self, item: dict) -> bool:
         """Actualiza precintos del item desde las filas del Excel en memoria.
-        Si los precintos cambiaron, regenera el QR y persiste el cambio.
+        El QR no incluye precintos (el campo "P" es para otra cosa), así que
+        solo se actualiza la lista para mostrar en la app del cargador.
         Devuelve True si hubo cambios."""
         if not item or not self._rows:
             return False
@@ -544,20 +545,7 @@ class Api:
             return False
         item["precintos"] = fresh
         try:
-            payload = json.loads(item.get("qr_payload_compact") or "{}")
-            payload["P"] = fresh
-            compact = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
-            png_bytes = core.make_qr_png(compact)
-            item["qr_png_b64"] = "data:image/png;base64," + base64.b64encode(png_bytes).decode()
-            item["qr_payload_compact"] = compact
-        except Exception:
-            pass
-        try:
-            queue_manager.get_manager().update_item_fields(item["id"], {
-                "precintos": item["precintos"],
-                "qr_png_b64": item.get("qr_png_b64", ""),
-                "qr_payload_compact": item.get("qr_payload_compact", ""),
-            })
+            queue_manager.get_manager().update_item_fields(item["id"], {"precintos": fresh})
         except Exception:
             pass
         return True
