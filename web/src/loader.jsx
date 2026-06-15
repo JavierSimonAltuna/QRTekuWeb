@@ -30,6 +30,7 @@ const LoaderApp = () => {
   const [queuedCount, setQueuedCount] = useState(0);
   const [completedInfo, setCompletedInfo] = useState(null);
   const [requesting, setRequesting] = useState(false);
+  const [refreshingPrec, setRefreshingPrec] = useState(false);
   const [toast, setToast] = useState(null);
 
   const showToast = (text) => {
@@ -95,6 +96,23 @@ const LoaderApp = () => {
     setRequesting(false);
   };
 
+  const handleRefreshPrecintos = async () => {
+    if (!loader || refreshingPrec) return;
+    setRefreshingPrec(true);
+    try {
+      const r = await window.api.call("loader_refresh_precintos", loader.id);
+      if (r.ok) {
+        setItem(r.item);
+        showToast(r.changed ? "Precintos actualizados" : "Sin cambios en precintos");
+      } else {
+        showToast(r.error || "Error al consultar precintos");
+      }
+    } catch (e) {
+      showToast("Error: " + (e.message || e));
+    }
+    setRefreshingPrec(false);
+  };
+
   const handleFinalize = () => setScreen("confirming");
   const handleCancelConfirm = () => setScreen("assigned");
 
@@ -154,6 +172,8 @@ const LoaderApp = () => {
           queuedCount={queuedCount}
           loader={loader}
           onFinalize={handleFinalize}
+          onRefreshPrecintos={handleRefreshPrecintos}
+          refreshingPrec={refreshingPrec}
         />
       )}
       {screen === "confirming" && item && (
@@ -278,7 +298,7 @@ const WaitingScreen = ({ loader, queuedCount, requesting, onRequest, onLogout })
 // ───────────────────────────────────────────────────────────────
 // Carga asignada (la pantalla principal del cargador)
 // ───────────────────────────────────────────────────────────────
-const AssignedScreen = ({ item, queuedCount, loader, onFinalize }) => {
+const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecintos, refreshingPrec }) => {
   const tipoRefr = item.tipo_carga === "REFRIGERADO";
   return (
     <div style={LS.assignRoot}>
@@ -385,7 +405,12 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize }) => {
         <div style={LS.precSec}>
           <div style={LS.precHead}>
             <div style={LS.precTitle}>Precintos</div>
-            <div style={LS.precCount}>{(item.precintos || []).length} PRECINTO{(item.precintos || []).length !== 1 ? "S" : ""}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={LS.precCount}>{(item.precintos || []).length} PRECINTO{(item.precintos || []).length !== 1 ? "S" : ""}</div>
+              <button onClick={onRefreshPrecintos} disabled={refreshingPrec} style={LS.precRefreshBtn} title="Comprobar si hay nuevos precintos">
+                {refreshingPrec ? "…" : "↻"}
+              </button>
+            </div>
           </div>
           <div style={LS.precList}>
             {(item.precintos || []).map((p, i) => (
@@ -679,6 +704,7 @@ const LS = {
   precHead: { display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 },
   precTitle: { fontSize: 15, fontWeight: 700, color: "#1c1917" },
   precCount: { fontSize: 10, fontWeight: 700, letterSpacing: 1.2, color: "#a8a29e", textTransform: "uppercase" },
+  precRefreshBtn: { width: 26, height: 26, borderRadius: "50%", border: "1px solid #e7e5e4", background: "#fff", color: "#78716c", fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontFamily: "inherit", padding: 0 },
   precList: { display: "flex", flexDirection: "column", gap: 8 },
   precRow: { borderTop: "1px solid #f4f4f3", paddingTop: 10 },
   precRowHead: { display: "flex", justifyContent: "space-between", alignItems: "center" },

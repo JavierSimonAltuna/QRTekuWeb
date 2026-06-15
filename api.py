@@ -526,21 +526,22 @@ class Api:
     # ──────────────────────────────────────────────────────────────
     # COLA BLEECKER — helpers internos
     # ──────────────────────────────────────────────────────────────
-    def _refresh_precintos(self, item: dict) -> None:
+    def _refresh_precintos(self, item: dict) -> bool:
         """Actualiza precintos del item desde las filas del Excel en memoria.
-        Si los precintos cambiaron, regenera el QR y persiste el cambio."""
+        Si los precintos cambiaron, regenera el QR y persiste el cambio.
+        Devuelve True si hubo cambios."""
         if not item or not self._rows:
-            return
+            return False
         viaje_n = str(item.get("viaje_n", "")).strip()
         matching = [r for r in self._rows if str(r.get("n", "")).strip() == viaje_n]
         if not matching:
-            return
+            return False
         fresh = []
         for r in matching:
             fresh.extend(r.get("precintos_data") or [])
         current = item.get("precintos") or []
         if fresh == current:
-            return
+            return False
         item["precintos"] = fresh
         try:
             payload = json.loads(item.get("qr_payload_compact") or "{}")
@@ -559,6 +560,7 @@ class Api:
             })
         except Exception:
             pass
+        return True
 
     # ──────────────────────────────────────────────────────────────
     # COLA BLEECKER — Cargador
@@ -581,6 +583,19 @@ class Api:
             return {"ok": True, "item": item, "queued_count": counts["queued"]}
         except Exception as e:
             return {"ok": False, "error": str(e)}
+
+    def loader_refresh_precintos(self, loader_id: str) -> dict:
+        """Vuelve a consultar el Excel para la carga en curso del cargador,
+        por si se han añadido precintos mientras la carga estaba en marcha."""
+        try:
+            mgr = queue_manager.get_manager()
+            item = mgr.get_current_for(loader_id)
+            if not item:
+                return {"ok": False, "error": "No hay carga asignada"}
+            changed = self._refresh_precintos(item)
+            return {"ok": True, "item": item, "changed": changed}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "trace": traceback.format_exc()}
 
     def loader_request_next(self, loader_id: str) -> dict:
         """Pide la siguiente carga. Si ya tiene asignada, devuelve esa.
