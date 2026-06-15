@@ -815,23 +815,26 @@ const LoaderFormModal = ({ form, onChange, onSave, onClose }) => {
 // ───────────────────────────────────────────────────────────────
 // Modal carga manual fuera de plan
 // ───────────────────────────────────────────────────────────────
+const MANUAL_FIELD_STYLE = { display: "block", width: "100%", marginTop: 5, padding: "8px 10px", border: "1px solid #e7e5e4", borderRadius: 6, fontSize: 13, fontFamily: "inherit", color: "#1c1917", background: "#fff", boxSizing: "border-box" };
+const MANUAL_LABEL_STYLE = { fontSize: 11, fontWeight: 700, letterSpacing: 0.8, color: "#a8a29e", textTransform: "uppercase" };
+
+const ManualField = ({ label, value, onChange, placeholder, mono }) => (
+  <div>
+    <label style={MANUAL_LABEL_STYLE}>{label}</label>
+    <input
+      type="text"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      style={{ ...MANUAL_FIELD_STYLE, ...(mono ? { fontFamily: "ui-monospace, monospace" } : {}) }}
+    />
+  </div>
+);
+
 const ManualCargaModal = ({ form, onChange, onSave, onClose }) => {
   const set = (k, v) => onChange({ ...form, [k]: v });
   const isRefri = form.queue_type === "refrigerado";
-  const fieldStyle = { display: "block", width: "100%", marginTop: 5, padding: "8px 10px", border: "1px solid #e7e5e4", borderRadius: 6, fontSize: 13, fontFamily: "inherit", color: "#1c1917", background: "#fff", boxSizing: "border-box" };
-  const labelStyle = { fontSize: 11, fontWeight: 700, letterSpacing: 0.8, color: "#a8a29e", textTransform: "uppercase" };
-  const Field = ({ label, k, placeholder, mono }) => (
-    <div>
-      <label style={labelStyle}>{label}</label>
-      <input
-        type="text"
-        value={form[k]}
-        onChange={(e) => set(k, e.target.value)}
-        placeholder={placeholder}
-        style={{ ...fieldStyle, ...(mono ? { fontFamily: "ui-monospace, monospace" } : {}) }}
-      />
-    </div>
-  );
+  const labelStyle = MANUAL_LABEL_STYLE;
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -858,27 +861,27 @@ const ManualCargaModal = ({ form, onChange, onSave, onClose }) => {
             </div>
           </div>
 
-          <Field label="Destino *" k="destino" placeholder="COMPOSTELA" />
+          <ManualField label="Destino *" value={form.destino} onChange={(v) => set("destino", v)} placeholder="COMPOSTELA" />
 
           <div style={{ display: "flex", gap: 10 }}>
-            <div style={{ flex: 1 }}><Field label="Tractora" k="tractora" placeholder="0805-MSG" mono /></div>
-            <div style={{ flex: 1 }}><Field label="Remolque" k="remolque" placeholder="R-0034-BCT" mono /></div>
+            <div style={{ flex: 1 }}><ManualField label="Tractora" value={form.tractora} onChange={(v) => set("tractora", v)} placeholder="0805-MSG" mono /></div>
+            <div style={{ flex: 1 }}><ManualField label="Remolque" value={form.remolque} onChange={(v) => set("remolque", v)} placeholder="R-0034-BCT" mono /></div>
           </div>
 
           <div style={{ display: "flex", gap: 10 }}>
-            <div style={{ flex: 1 }}><Field label="Muelle" k="muelle" placeholder="03" /></div>
-            <div style={{ flex: 1 }}><Field label="Playa" k="playa" placeholder="5" /></div>
-            <div style={{ flex: 1 }}><Field label="Salida" k="hora_salida" placeholder="23:45" /></div>
+            <div style={{ flex: 1 }}><ManualField label="Muelle" value={form.muelle} onChange={(v) => set("muelle", v)} placeholder="03" /></div>
+            <div style={{ flex: 1 }}><ManualField label="Playa" value={form.playa} onChange={(v) => set("playa", v)} placeholder="5" /></div>
+            <div style={{ flex: 1 }}><ManualField label="Salida" value={form.hora_salida} onChange={(v) => set("hora_salida", v)} placeholder="23:45" /></div>
           </div>
 
           <div style={{ display: "flex", gap: 10 }}>
-            <div style={{ flex: 1 }}><Field label="Nº camión" k="cam" placeholder="002" /></div>
-            <div style={{ flex: 1 }}><Field label="Cliente" k="cod_centro" placeholder="0770" /></div>
+            <div style={{ flex: 1 }}><ManualField label="Nº camión" value={form.cam} onChange={(v) => set("cam", v)} placeholder="002" /></div>
+            <div style={{ flex: 1 }}><ManualField label="Cliente" value={form.cod_centro} onChange={(v) => set("cod_centro", v)} placeholder="0770" /></div>
           </div>
 
           <div style={{ display: "flex", gap: 10 }}>
-            <div style={{ flex: 1 }}><Field label="CIF" k="cif" placeholder="A39020805" mono /></div>
-            <div style={{ flex: 1 }}><Field label="Agencia" k="agencia" placeholder="BELINDA" /></div>
+            <div style={{ flex: 1 }}><ManualField label="CIF" value={form.cif} onChange={(v) => set("cif", v)} placeholder="A39020805" mono /></div>
+            <div style={{ flex: 1 }}><ManualField label="Agencia" value={form.agencia} onChange={(v) => set("agencia", v)} placeholder="BELINDA" /></div>
           </div>
 
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#1c1917", cursor: "pointer" }}>
