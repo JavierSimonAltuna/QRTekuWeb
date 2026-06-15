@@ -220,7 +220,7 @@ const QRTekuApp = () => {
   // PAYLOAD QR — SOLO T,R,N,D,C,E,P (sin PL/MU)
   const buildPayload = (state) => ({
     T: state.T, R: state.R, N: state.N, D: state.D, C: state.C, E: state.E,
-    P: state.obs.map((o) => ({ H: o.H, D: o.D })),
+    P: [],
   });
   // Meta para el Word (no va en el QR)
   const buildMeta = (state) => ({ playa: state.PL || "", muelle: state.MU || "" });
