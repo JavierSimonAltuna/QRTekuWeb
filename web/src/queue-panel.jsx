@@ -858,7 +858,7 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onR
         {(item.combined_count != null || item.numsup_count != null) && (
           <Meta
             label="Pales"
-            value={`${item.combined_count ?? item.numsup_count} / 25`}
+            value={`${item.combined_count ?? item.numsup_count} / ${item.merch_threshold ?? 25}`}
           />
         )}
       </div>

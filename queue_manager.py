@@ -199,6 +199,7 @@ class QueueManager:
                             new_ok = bool(r.get("mercancia_ok", False))
                             existing["combined_count"] = r.get("combined_count")
                             existing["numsup_count"] = r.get("numsup_count")
+                            existing["merch_threshold"] = r.get("merch_threshold", existing.get("merch_threshold"))
                             existing["mercancia_ok"] = new_ok
                             if new_ok:
                                 existing["status"] = "queued"
