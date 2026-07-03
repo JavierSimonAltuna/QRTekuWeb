@@ -35,6 +35,12 @@ class Api:
         self._picker_open: bool = False
         self._rows: list = []   # filas enriquecidas del último Excel cargado
         self._excel_sessions: list = []  # historial de Excels cargados (máx 3)
+        self._ip_lan: str = "127.0.0.1"
+        self._port: int = 8765
+
+    def set_server_info(self, ip_lan: str, port: int):
+        self._ip_lan = ip_lan
+        self._port = port
 
     def set_window(self, window):
         self._window = window
@@ -262,7 +268,15 @@ class Api:
 
     def reload_excel(self) -> dict:
         if not self._last_excel_path:
-            return {"ok": False, "error": "No hay archivo previo cargado."}
+            return {"ok": False, "error": "no_file"}
+        if not os.path.exists(self._last_excel_path):
+            # Archivo fue subido por base64 (tablet) y el temporal ya no existe;
+            # devolvemos las filas en memoria para que el UI no pierda estado.
+            if self._rows:
+                return {"ok": True, "rows": self._rows,
+                        "filename": os.path.basename(self._last_excel_path),
+                        "fecha_b2": "", "count": len(self._rows), "auto_enqueued": 0}
+            return {"ok": False, "error": "no_file"}
         if self._picker_open:
             return {"ok": False, "error": "picker_open"}
         core.clear_chf_caches()   # CIF/agencia siempre frescos; TOULIV1 permanece cacheado
@@ -380,6 +394,10 @@ class Api:
             "name": "PULSO",
             "company": "Garvasa",
             "platform": os.name,
+            "ip_lan": self._ip_lan,
+            "port": self._port,
+            "supervisor_url": f"http://{self._ip_lan}:{self._port}/index.html",
+            "loader_url": f"http://{self._ip_lan}:{self._port}/index.html?mode=loader",
         }
 
     # ──────────────────────────────────────────────────────────────

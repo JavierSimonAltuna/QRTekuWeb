@@ -75,9 +75,12 @@ def main():
 
     api = Api()
     port, ip_lan = start_local_server(web_dir, api)
+    api.set_server_info(ip_lan, port)
     url = f"http://127.0.0.1:{port}/index.html"
+    supervisor_url_lan = f"http://{ip_lan}:{port}/index.html"
     loader_url_lan = f"http://{ip_lan}:{port}/index.html?mode=loader"
-    print(f"\n[PULSO] Supervisor: {url}")
+    print(f"\n[PULSO] Supervisor (local):   {url}")
+    print(f"[PULSO] Supervisor (tablet):  {supervisor_url_lan}")
     print(f"[PULSO] Cargador (móvil LAN): {loader_url_lan}\n")
 
     window = webview.create_window(

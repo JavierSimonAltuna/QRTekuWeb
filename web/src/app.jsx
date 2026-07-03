@@ -49,6 +49,7 @@ const QRTekuApp = () => {
   const [queueCounts, setQueueCounts] = useState({ queued: 0, assigned: 0, done: 0 });
   const [excelSessions, setExcelSessions] = useState([]);
   const [showExcelPicker, setShowExcelPicker] = useState(false);
+  const [serverInfo, setServerInfo] = useState(null);
   const winW = useWindowWidth();
   const isTablet = winW < 1100;
   // En tablet, controla si mostrar la lista o el detalle
@@ -86,14 +87,14 @@ const QRTekuApp = () => {
   }, []);
 
   // ── Auto-refresh para detectar cambios en el Excel (HORA ACULE) ─────────
-  // Usa setTimeout recursivo para evitar solapamiento si reload tarda >5s.
+  // Solo cuando hay un archivo local accesible (pywebview). Desde tablet no aplica.
   useEffect(() => {
     if (!connected || !tw.autoRefresh || !fileInfo) return;
     let alive = true;
     let tid = null;
     const tick = async () => {
       try {
-        const res = await window.pywebview.api.reload_excel();
+        const res = await window.api.call("reload_excel");
         if (alive && res && res.ok) {
           setRows((prevRows) => {
             const doneSet = new Set(prevRows.filter((r) => r.estado === "done").map((r) => r.n));
@@ -107,6 +108,11 @@ const QRTekuApp = () => {
     tid = setTimeout(tick, 5000);
     return () => { alive = false; clearTimeout(tid); };
   }, [connected, tw.autoRefresh, fileInfo]);
+
+  // ── Info del servidor (IP LAN, URLs) ──────────────────────────────────
+  useEffect(() => {
+    window.api.call("app_info").then(r => { if (r) setServerInfo(r); }).catch(() => {});
+  }, []);
 
   // ── Polling contadores de cola (badge en la pestaña) ───────────────────
   useEffect(() => {
@@ -172,12 +178,11 @@ const QRTekuApp = () => {
 
   // ── Selection + ODBC lookup ────────────────────────────────────
   const lookupCifAgencia = useCallback(async (idx, row) => {
-    if (!apiReady()) return;
     const matricula = (row.matriculas || "").split("/")[0]?.trim();
     if (!matricula) return;
     setLoadingOdbc(true);
     try {
-      const res = await window.pywebview.api.lookup_chf(matricula);
+      const res = await window.api.call("lookup_chf", matricula);
       setLoadingOdbc(false);
       if (res.ok && res.found) {
         setEditing((e) => ({ ...e, [idx]: { ...e[idx], C: res.cif, E: res.agencia, odbcDone: true, odbcFound: true } }));
@@ -301,8 +306,7 @@ const QRTekuApp = () => {
   };
 
   const handleReload = async () => {
-    if (!apiReady()) return;
-    const res = await window.pywebview.api.reload_excel();
+    const res = await window.api.call("reload_excel");
     if (res.ok) {
       applyExcelResult(res);
       pushToast("Excel recargado", "success");
@@ -324,17 +328,13 @@ const QRTekuApp = () => {
     const meta = buildMeta(state);
     const precintos = state.precintos.map((p) => ({ centro: p.centro, precinto: p.code }));
 
-    if (apiReady()) {
-      try {
-        const res = await window.pywebview.api.generate_word_and_print(payload, r.destino, precintos, true, meta);
-        if (!res.ok) { pushToast(`Error: ${res.error}`, "error"); return; }
-        pushToast(`Word generado · ${res.path.split(/[\\/]/).pop()}`, "success");
-      } catch (e) {
-        pushToast(`Error: ${e.message || e}`, "error");
-        return;
-      }
-    } else {
-      pushToast("Modo demo · no se imprime", "info");
+    try {
+      const res = await window.api.call("generate_word_and_print", payload, r.destino, precintos, true, meta);
+      if (!res.ok) { pushToast(`Error: ${res.error}`, "error"); return; }
+      pushToast(`Word generado · ${(res.path || "").split(/[\\/]/).pop()}`, "success");
+    } catch (e) {
+      pushToast(`Error: ${e.message || e}`, "error");
+      return;
     }
     setRows((rs) => rs.map((row, i) => row === r ? { ...row, estado: "done" } : row));
     setSelectedIdx(null);
@@ -493,6 +493,13 @@ const QRTekuApp = () => {
           )}
         </button>
         <div style={{ flex: 1 }} />
+        {serverInfo?.supervisor_url && serverInfo.ip_lan !== "127.0.0.1" && (
+          <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.25)", borderRadius: 6, fontSize: 11, color: "#fbbf24", fontFamily: "ui-monospace, monospace", marginRight: 4 }}
+            title="URL para acceder al supervisor desde tablet u otro dispositivo en la misma red">
+            <IconExternal size={10} />
+            {serverInfo.supervisor_url}
+          </div>
+        )}
         <a
           href="?mode=loader"
           target="_blank"

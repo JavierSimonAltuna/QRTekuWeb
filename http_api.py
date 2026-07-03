@@ -25,8 +25,11 @@ ALLOWED_METHODS = {
     "loader_refresh_precintos",
     "loader_finish",
     "loader_set_muelle",
-    # Cargas (supervisor desde navegador)
+    # Cargas (supervisor desde navegador o tablet)
     "load_excel_base64",
+    "reload_excel",
+    "lookup_chf",
+    "generate_word_and_print",
     # Cola (supervisor, lectura/escritura)
     "queue_snapshot",
     "queue_enqueue_manual",
