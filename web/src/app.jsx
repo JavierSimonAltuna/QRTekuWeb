@@ -3,6 +3,16 @@
 
 const { useState, useMemo, useRef, useEffect, useCallback } = React;
 
+const useWindowWidth = () => {
+  const [w, setW] = useState(window.innerWidth);
+  useEffect(() => {
+    const h = () => setW(window.innerWidth);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+  return w;
+};
+
 // ───────────────────────────────────────────────────────────────────
 // Tweaks
 // ───────────────────────────────────────────────────────────────────
@@ -37,6 +47,12 @@ const QRTekuApp = () => {
   const [loadingOdbc, setLoadingOdbc] = useState(false);
   const [view, setView] = useState("cargas");  // 'cargas' | 'cola'
   const [queueCounts, setQueueCounts] = useState({ queued: 0, assigned: 0, done: 0 });
+  const [excelSessions, setExcelSessions] = useState([]);
+  const [showExcelPicker, setShowExcelPicker] = useState(false);
+  const winW = useWindowWidth();
+  const isTablet = winW < 1100;
+  // En tablet, controla si mostrar la lista o el detalle
+  const [tabletPane, setTabletPane] = useState("list"); // 'list' | 'detail'
 
   // ── Toasts ─────────────────────────────────────────────────────
   const pushToast = useCallback((text, type = "info") => {
@@ -179,8 +195,9 @@ const QRTekuApp = () => {
   }, [pushToast]);
 
   const selectRow = useCallback((idx) => {
-    if (idx === selectedIdx) { setSelectedIdx(null); return; }
+    if (idx === selectedIdx) { setSelectedIdx(null); setTabletPane("list"); return; }
     setSelectedIdx(idx);
+    setTabletPane("detail");
     if (!editing[idx]) {
       const row = filtered[idx];
       const state = initRowEdit(row);
@@ -228,6 +245,20 @@ const QRTekuApp = () => {
   // Comprueba el bridge directamente en el momento de la llamada (no React state)
   const apiReady = () => !!(window.pywebview && window.pywebview.api);
 
+  const refreshExcelSessions = useCallback(async () => {
+    try {
+      const r = await window.api.call("get_excel_sessions");
+      if (r.ok) setExcelSessions(r.sessions || []);
+    } catch (_) {}
+  }, []);
+
+  const applyExcelResult = useCallback((res, path) => {
+    setRows(res.rows);
+    setFileInfo({ name: res.filename, count: res.count, fecha: res.fecha_b2, path: path || res.filename });
+    setSelectedIdx(null);
+    setEditing({});
+  }, []);
+
   const handleImport = async () => {
     if (apiReady()) {
       // Ventana PyWebView: diálogo nativo de archivo
@@ -236,11 +267,9 @@ const QRTekuApp = () => {
         if (!path) return;
         const res = await window.pywebview.api.load_excel(path);
         if (!res.ok) { pushToast(`Error: ${res.error}`, "error"); return; }
-        setRows(res.rows);
-        setFileInfo({ name: res.filename, count: res.count, fecha: res.fecha_b2, path });
-        setSelectedIdx(null);
-        setEditing({});
+        applyExcelResult(res, path);
         pushToast(`${res.count} filas cargadas desde ${res.filename}`, "success");
+        refreshExcelSessions();
       } catch (e) {
         pushToast(`Error: ${e.message || e}`, "error");
       }
@@ -258,11 +287,9 @@ const QRTekuApp = () => {
             const b64 = ev.target.result.split(",")[1];
             const res = await window.api.call("load_excel_base64", file.name, b64);
             if (!res.ok) { pushToast(`Error: ${res.error}`, "error"); return; }
-            setRows(res.rows);
-            setFileInfo({ name: res.filename, count: res.count, fecha: res.fecha_b2, path: file.name });
-            setSelectedIdx(null);
-            setEditing({});
+            applyExcelResult(res, file.name);
             pushToast(`${res.count} filas cargadas desde ${res.filename}`, "success");
+            refreshExcelSessions();
           } catch (e) {
             pushToast(`Error: ${e.message || e}`, "error");
           }
@@ -277,11 +304,9 @@ const QRTekuApp = () => {
     if (!apiReady()) return;
     const res = await window.pywebview.api.reload_excel();
     if (res.ok) {
-      setRows(res.rows);
-      setFileInfo({ name: res.filename, count: res.count, fecha: res.fecha_b2 });
-      setEditing({});
-      setSelectedIdx(null);
+      applyExcelResult(res);
       pushToast("Excel recargado", "success");
+      refreshExcelSessions();
     } else {
       pushToast(res.error, "error");
     }
@@ -421,6 +446,15 @@ const QRTekuApp = () => {
               <IconRefresh size={14} />
             </button>
           )}
+          {excelSessions.length > 1 && (
+            <button
+              onClick={() => setShowExcelPicker(true)}
+              title="Cambiar plan de carga activo"
+              style={{ ...S.topIconBtn, padding: "0 10px", fontSize: 11, fontWeight: 600, color: "#fbbf24", borderColor: "rgba(251,191,36,0.3)", gap: 5, display: "flex", alignItems: "center", width: "auto" }}
+            >
+              Plan ({excelSessions.findIndex(s => s.active) + 1}/{excelSessions.length})
+            </button>
+          )}
           <span style={S.topDivider} />
           <div style={S.connStatus}>
             <span style={{ width: 7, height: 7, borderRadius: "50%", background: connected ? "#22c55e" : "#a8a29e", boxShadow: connected ? "0 0 0 3px rgba(34,197,94,0.18)" : "none" }} />
@@ -525,9 +559,20 @@ const QRTekuApp = () => {
           </div>
 
           {/* Split content */}
-          <div style={S.split}>
-            {/* Left: table */}
-            <section style={S.leftPane}>
+          <div style={isTablet
+            ? { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }
+            : S.split
+          }>
+            {/* Left: table — hidden on tablet when showing detail */}
+            {(!isTablet || tabletPane === "list") && (
+            <section style={isTablet ? { ...S.leftPane, flex: 1 } : S.leftPane}>
+              {isTablet && tabletPane === "list" && selectedIdx !== null && (
+                <div style={{ padding: "8px 12px", background: "#fff7ed", borderBottom: "1px solid #fed7aa", display: "flex", alignItems: "center", gap: 8 }}>
+                  <button onClick={() => setTabletPane("detail")} style={{ fontSize: 12, fontWeight: 600, color: "#c2410c", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit" }}>
+                    → Ver detalle seleccionado
+                  </button>
+                </div>
+              )}
               <div style={S.tableHead}>
                 <span style={{ width: 56, textAlign: "center" }}>VIAJE</span>
                 <span style={{ flex: 1, minWidth: 0 }}>DESTINO · MATRÍCULA · AGENCIA</span>
@@ -545,21 +590,32 @@ const QRTekuApp = () => {
               </div>
               <div style={S.tableFooter}>
                 <div style={{ display: "flex", gap: 14, fontSize: 11, color: "#78716c" }}>
-                  <span><kbd style={S.kbdLight}>↑↓</kbd> navegar</span>
-                  <span><kbd style={S.kbdLight}>⏎</kbd> abrir</span>
-                  <span><kbd style={S.kbdLight}>⌘⏎</kbd> imprimir</span>
-                  <span><kbd style={S.kbdLight}>Esc</kbd> cerrar</span>
+                  {!isTablet && <>
+                    <span><kbd style={S.kbdLight}>↑↓</kbd> navegar</span>
+                    <span><kbd style={S.kbdLight}>⏎</kbd> abrir</span>
+                    <span><kbd style={S.kbdLight}>⌘⏎</kbd> imprimir</span>
+                    <span><kbd style={S.kbdLight}>Esc</kbd> cerrar</span>
+                  </>}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                   <span style={{ fontSize: 11.5, color: "#a8a29e" }}>{filtered.length} de {stats.all}</span>
                   <span style={{ fontSize: 11.5, color: "#d6d3d1" }}>·</span>
-                  <span style={{ fontSize: 11, color: "#c4c0bc", fontStyle: "italic" }}>Javier Simón-Altuna San Martín</span>
+                  {!isTablet && <span style={{ fontSize: 11, color: "#c4c0bc", fontStyle: "italic" }}>Javier Simón-Altuna San Martín</span>}
                 </div>
               </div>
             </section>
+            )}
 
-            {/* Right: WORD-PAGE PREVIEW */}
-            <section style={S.rightPane}>
+            {/* Right: WORD-PAGE PREVIEW — on tablet, full screen with back button */}
+            {(!isTablet || tabletPane === "detail") && (
+            <section style={isTablet ? { ...S.rightPane, flex: 1 } : S.rightPane}>
+              {isTablet && (
+                <div style={{ padding: "8px 12px", background: "#1c1917", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                  <button onClick={() => setTabletPane("list")} style={{ fontSize: 12, fontWeight: 600, color: "#fafaf9", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit" }}>
+                    ← Volver a lista
+                  </button>
+                </div>
+              )}
               {sel && selState ? (
                 <WordPreview
                   row={sel}
@@ -571,7 +627,7 @@ const QRTekuApp = () => {
                   onAddPrec={(code, centro) => addPrecinto(selectedIdx, code, centro)}
                   onDelPrec={(pid) => delPrecinto(selectedIdx, pid)}
                   onPrecCentro={(pid, centro) => updatePrecintoCentro(selectedIdx, pid, centro)}
-                  onClose={() => setSelectedIdx(null)}
+                  onClose={() => { setSelectedIdx(null); setTabletPane("list"); }}
                   onConfirm={() => handleConfirm(selectedIdx)}
                   onCopy={() => copyJSON(selectedIdx)}
                   onSendToQueue={() => handleEnqueueRow(selectedIdx)}
@@ -581,8 +637,55 @@ const QRTekuApp = () => {
                 <SelectHint />
               )}
             </section>
+            )}
           </div>
         </>
+      )}
+
+      {/* ─── Modal selector de plan de carga ─── */}
+      {showExcelPicker && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowExcelPicker(false); }}>
+          <div style={{ background: "#fff", borderRadius: 12, width: "min(480px, 92vw)", boxShadow: "0 20px 60px rgba(0,0,0,0.25)", overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: "1px solid #e7e5e4" }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "#1c1917" }}>Cambiar plan de carga</span>
+              <button onClick={() => setShowExcelPicker(false)} style={{ background: "transparent", border: "none", fontSize: 18, color: "#a8a29e", cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ padding: "14px 20px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+              <p style={{ margin: 0, fontSize: 12, color: "#78716c" }}>
+                Solo cambia las filas mostradas. La cola Bleecker no se modifica automáticamente.
+              </p>
+              {excelSessions.map((s, idx) => (
+                <button
+                  key={s.path}
+                  onClick={async () => {
+                    const r = await window.api.call("switch_excel_session", idx);
+                    if (r.ok) {
+                      applyExcelResult(r);
+                      pushToast(`Plan activo: ${r.filename}`, "success");
+                      refreshExcelSessions();
+                    } else {
+                      pushToast(r.error || "Error", "error");
+                    }
+                    setShowExcelPicker(false);
+                  }}
+                  style={{
+                    display: "flex", flexDirection: "column", gap: 4, padding: "12px 14px",
+                    borderRadius: 8, border: `2px solid ${s.active ? "#dc2626" : "#e7e5e4"}`,
+                    background: s.active ? "#fff5f5" : "#fafaf9",
+                    cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {s.active && <span style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", background: "#fee2e2", padding: "1px 7px", borderRadius: 999 }}>ACTIVO</span>}
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "#1c1917" }}>{s.filename}</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#78716c" }}>{s.count} filas · fecha B2: {s.fecha}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Toasts */}
@@ -741,6 +844,23 @@ const RowC = ({ row, selected, dense, onClick }) => {
             <span style={{ color: selected ? "rgba(255,255,255,0.5)" : "#a8a29e" }}>{row.expedicion}</span>
           </>}
         </div>
+        {(row.ruta_carga != null || row.combined_count != null || row.numsup_count != null) && (
+          <div style={{
+            fontSize: 10.5, marginTop: 3, marginLeft: 14, display: "flex", gap: 8, alignItems: "center",
+            color: selected ? "rgba(255,255,255,0.45)" : "#a8a29e",
+            fontFamily: "'Inter Tight', Inter, sans-serif",
+          }}>
+            {row.ruta_carga != null && (
+              <span>Ruta <b style={{ color: selected ? "rgba(255,255,255,0.65)" : "#78716c" }}>{row.ruta_carga}</b></span>
+            )}
+            {(row.combined_count != null || row.numsup_count != null) && row.ruta_carga != null && (
+              <span style={{ color: selected ? "rgba(255,255,255,0.2)" : "#d6d3d1" }}>·</span>
+            )}
+            {(row.combined_count != null || row.numsup_count != null) && (
+              <span><b style={{ color: selected ? "rgba(255,255,255,0.65)" : "#78716c" }}>{row.combined_count ?? row.numsup_count}</b> pales</span>
+            )}
+          </div>
+        )}
       </div>
       <div style={{ width: 80, textAlign: "right" }}>
         {isAculado ? <span style={{ fontSize: 11, color: selected ? "#86efac" : "#15803d", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, display: "inline-flex", alignItems: "center", gap: 4 }}>● {row.hora_acule || "OK"}</span>

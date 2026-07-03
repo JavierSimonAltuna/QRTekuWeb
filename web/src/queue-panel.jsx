@@ -4,7 +4,20 @@
 
 const { useState, useEffect, useCallback } = React;
 
+const useWindowWidth = () => {
+  const [w, setW] = useState(window.innerWidth);
+  useEffect(() => {
+    const h = () => setW(window.innerWidth);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+  return w;
+};
+
 const QueuePanel = ({ pushToast }) => {
+  const winW = useWindowWidth();
+  const isTablet = winW < 1000;
+
   const [snap, setSnap] = useState({
     queued: [], queued_refr: [],
     assigned: [], assigned_refr: [],
@@ -21,6 +34,8 @@ const QueuePanel = ({ pushToast }) => {
   const [odbcLog, setOdbcLog] = useState([]);
   const [loaderForm, setLoaderForm] = useState(null); // null | {id,name,pin,queue_type,isNew}
   const [manualForm, setManualForm] = useState(null); // null | carga manual fuera de plan
+  const [auditLog, setAuditLog] = useState([]);
+  const [auditLoading, setAuditLoading] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -185,6 +200,15 @@ const QueuePanel = ({ pushToast }) => {
     );
   };
 
+  const fetchAuditLog = async () => {
+    setAuditLoading(true);
+    try {
+      const r = await window.api.call("get_audit_log");
+      if (r.ok) setAuditLog(r.log || []);
+    } catch (e) { /* silencio */ }
+    setAuditLoading(false);
+  };
+
   const loaderById = (id) => snap.loaders.find((l) => l.id === id);
   const pendingMerch      = snap.pending_merch      || [];
   const pendingMerchRefri = snap.pending_merch_refr || [];
@@ -285,6 +309,12 @@ const QueuePanel = ({ pushToast }) => {
             <span style={{ ...QS.tabBadge, background: "#fef3c7", color: "#d97706" }}>{pendingMerchRefri.length}</span>
           )}
         </button>
+        <button
+          onClick={() => { setActiveTab("actividad"); fetchAuditLog(); }}
+          style={{ ...QS.tab, ...(activeTab === "actividad" ? QS.tabActive : {}) }}
+        >
+          Actividad
+        </button>
       </div>
 
       {/* ─── Buscador (en tabs de cola) ─── */}
@@ -308,7 +338,7 @@ const QueuePanel = ({ pushToast }) => {
 
       {/* ─── Tab: Cola de cargas ─── */}
       {activeTab === "cola" && (
-        <div style={QS.grid}>
+        <div style={{ ...QS.grid, gridTemplateColumns: isTablet ? "1fr" : "1fr 1fr 1fr", overflowY: isTablet ? "auto" : "hidden" }}>
           {/* ── Cola ── */}
           <section style={QS.col}>
             <div style={QS.colHead}>
@@ -347,12 +377,12 @@ const QueuePanel = ({ pushToast }) => {
               <span style={QS.colCount}>{(snap.assigned||[]).length}</span>
             </div>
             <div style={QS.list}>
-              {(snap.assigned||[]).filter(matchesSearch).length === 0 ? (
+              {(snap.assigned||[]).length === 0 ? (
                 <EmptyMini
-                  label={search ? "Sin resultados" : "Ninguna carga en curso"}
-                  hint={search ? `No coincide ningún elemento con "${search}"` : "Cuando un cargador pida una carga aparecerá aquí"}
+                  label="Ninguna carga en curso"
+                  hint="Cuando un cargador pida una carga aparecerá aquí"
                 />
-              ) : (snap.assigned||[]).filter(matchesSearch).map((it) => (
+              ) : (snap.assigned||[]).map((it) => (
                 <AssignedCard
                   key={it.id}
                   item={it}
@@ -492,7 +522,7 @@ const QueuePanel = ({ pushToast }) => {
 
       {/* ─── Tab: Cola refrigerado ─── */}
       {activeTab === "cola_refri" && (
-        <div style={QS.grid}>
+        <div style={{ ...QS.grid, gridTemplateColumns: isTablet ? "1fr" : "1fr 1fr 1fr", overflowY: isTablet ? "auto" : "hidden" }}>
           {/* ── Cola refri ── */}
           <section style={QS.col}>
             <div style={QS.colHead}>
@@ -531,12 +561,12 @@ const QueuePanel = ({ pushToast }) => {
               <span style={QS.colCount}>{(snap.assigned_refr||[]).length}</span>
             </div>
             <div style={QS.list}>
-              {(snap.assigned_refr||[]).filter(matchesSearch).length === 0 ? (
+              {(snap.assigned_refr||[]).length === 0 ? (
                 <EmptyMini
-                  label={search ? "Sin resultados" : "Ninguna carga refrigerada en curso"}
-                  hint={search ? `No coincide con "${search}"` : "Cuando un cargador refri pida una carga aparecerá aquí"}
+                  label="Ninguna carga refrigerada en curso"
+                  hint="Cuando un cargador refri pida una carga aparecerá aquí"
                 />
-              ) : (snap.assigned_refr||[]).filter(matchesSearch).map((it) => (
+              ) : (snap.assigned_refr||[]).map((it) => (
                 <AssignedCard
                   key={it.id}
                   item={it}
@@ -629,6 +659,47 @@ const QueuePanel = ({ pushToast }) => {
                 {group.map((it) => (
                   <PendingMerchCard key={it.id} item={it} onRemove={() => handleRemove(it.id)} onRefreshNumsup={(ruta) => handleRefreshNumsup(it.id, ruta)} />
                 ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ─── Tab: Actividad ─── */}
+      {activeTab === "actividad" && (
+        <div style={{ flex: 1, overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#1c1917" }}>Historial de actividad</span>
+            <button onClick={fetchAuditLog} disabled={auditLoading} style={{ ...QS.refreshBtn, marginRight: 0, fontSize: 11, padding: "4px 10px" }}>
+              {auditLoading ? "…" : "↻ Actualizar"}
+            </button>
+          </div>
+          {auditLog.length === 0 ? (
+            <div style={{ padding: "40px 0", textAlign: "center", color: "#a8a29e", fontSize: 13 }}>
+              Sin actividad registrada todavía
+            </div>
+          ) : auditLog.map((e, i) => {
+            const actionColor = e.action === "asignada" ? "#15803d" : e.action === "finalizada" ? "#0ea5e9" : "#d97706";
+            const actionBg = e.action === "asignada" ? "#dcfce7" : e.action === "finalizada" ? "#dbeafe" : "#fef3c7";
+            return (
+              <div key={i} style={{ background: "#fff", border: "1px solid #e7e5e4", borderRadius: 8, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: actionBg, color: actionColor, textTransform: "uppercase", whiteSpace: "nowrap" }}>
+                  {e.action}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1c1917", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {e.destino || "—"}
+                    {e.viaje_n && <span style={{ fontSize: 11, color: "#a8a29e", marginLeft: 8, fontFamily: "ui-monospace, monospace" }}>#{e.viaje_n}</span>}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#78716c", marginTop: 2 }}>
+                    Cargador: <b>{e.loader_id || "—"}</b>
+                    {e.muelle && <> · Muelle <b>{e.muelle}</b></>}
+                    {e.prev_loader_id && <> · antes: {e.prev_loader_id}</>}
+                  </div>
+                </div>
+                <span style={{ fontSize: 11, color: "#a8a29e", fontFamily: "ui-monospace, monospace", flexShrink: 0 }}>
+                  {(e.ts || "").slice(11, 16)}
+                </span>
               </div>
             );
           })}

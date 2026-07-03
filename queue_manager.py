@@ -47,7 +47,18 @@ class QueueManager:
         self._items: list[dict] = []       # cola completa (queued + assigned + done)
         self._loaders: list[dict] = []
         self._counter: int = 0
+        self._audit: list[dict] = []       # log de actividad (en memoria, máx 500)
         self._load_from_disk()
+
+    def _add_audit(self, action: str, **kw):
+        entry = {"ts": datetime.now().isoformat(timespec="seconds"), "action": action, **kw}
+        self._audit.append(entry)
+        if len(self._audit) > 500:
+            self._audit = self._audit[-500:]
+
+    def get_audit_log(self, limit: int = 100) -> list[dict]:
+        with self._lock:
+            return list(reversed(self._audit[-limit:]))
 
     # ────────────────────────────────────────────────────────────
     # Persistencia
@@ -392,6 +403,9 @@ class QueueManager:
             chosen["assigned_to"] = loader_id
             chosen["assigned_at"] = datetime.now().isoformat(timespec="seconds")
             self._save()
+            self._add_audit("asignada", item_id=chosen["id"], destino=chosen.get("destino"),
+                            loader_id=loader_id, muelle=chosen.get("muelle"),
+                            viaje_n=chosen.get("viaje_n"))
             return chosen
 
     def get_current_for(self, loader_id: str) -> Optional[dict]:
@@ -421,6 +435,9 @@ class QueueManager:
                         loader["muelle_actual"] = it["muelle"]
                         self._save_loaders()
                     self._save()
+                    self._add_audit("finalizada", item_id=item_id, destino=it.get("destino"),
+                                    loader_id=loader_id, muelle=it.get("muelle"),
+                                    viaje_n=it.get("viaje_n"))
                     return {"ok": True, "completed": it}
             return {"ok": False, "error": "Asignación no encontrada"}
 
@@ -437,10 +454,14 @@ class QueueManager:
         with self._lock:
             for it in self._items:
                 if it["id"] == item_id and it["status"] in ("queued", "assigned"):
+                    prev_loader = it.get("assigned_to")
                     it["assigned_to"] = new_loader_id
                     it["status"] = "assigned"
                     it["assigned_at"] = datetime.now().isoformat(timespec="seconds")
                     self._save()
+                    self._add_audit("reasignada", item_id=item_id, destino=it.get("destino"),
+                                    loader_id=new_loader_id, prev_loader_id=prev_loader,
+                                    viaje_n=it.get("viaje_n"))
                     return {"ok": True, "item": it}
             return {"ok": False, "error": "No encontrado"}
 

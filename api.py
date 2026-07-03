@@ -34,6 +34,7 @@ class Api:
         self._last_precintos: list = []
         self._picker_open: bool = False
         self._rows: list = []   # filas enriquecidas del último Excel cargado
+        self._excel_sessions: list = []  # historial de Excels cargados (máx 3)
 
     def set_window(self, window):
         self._window = window
@@ -224,6 +225,13 @@ class Api:
             except Exception:
                 pass
             self._rows = rows  # guardar para releer precintos al asignar
+            # Historial de sesiones Excel (máx 3, deduplicar por ruta)
+            _fname = os.path.basename(path)
+            _session = {"path": path, "filename": _fname, "fecha": fecha_b2,
+                        "count": len(rows), "rows": rows}
+            self._excel_sessions = [s for s in self._excel_sessions if s["path"] != path]
+            self._excel_sessions.insert(0, _session)
+            self._excel_sessions = self._excel_sessions[:3]
             return {
                 "ok": True,
                 "rows": rows,
@@ -538,8 +546,13 @@ class Api:
         if not matching:
             return False
         fresh = []
+        seen_prec = set()
         for r in matching:
-            fresh.extend(r.get("precintos_data") or [])
+            for p in (r.get("precintos_data") or []):
+                key = (p.get("centro", ""), p.get("precinto", ""))
+                if key not in seen_prec:
+                    seen_prec.add(key)
+                    fresh.append(p)
         current = item.get("precintos") or []
         if fresh == current:
             return False
@@ -628,6 +641,36 @@ class Api:
         try:
             mgr = queue_manager.get_manager()
             return mgr.upsert_loader({"id": loader_id, "muelle_actual": str(muelle)})
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def get_excel_sessions(self) -> dict:
+        """Devuelve el historial de Excels cargados en esta sesión (sin las filas)."""
+        return {"ok": True, "sessions": [
+            {"path": s["path"], "filename": s["filename"], "fecha": s["fecha"],
+             "count": s["count"], "active": s["path"] == self._last_excel_path}
+            for s in self._excel_sessions
+        ]}
+
+    def switch_excel_session(self, idx: int) -> dict:
+        """Cambia a otro Excel cargado en memoria y devuelve sus filas."""
+        try:
+            idx = int(idx)
+            if not (0 <= idx < len(self._excel_sessions)):
+                return {"ok": False, "error": "Sesión no encontrada"}
+            s = self._excel_sessions[idx]
+            self._rows = s["rows"]
+            self._last_excel_path = s["path"]
+            return {"ok": True, "rows": s["rows"], "filename": s["filename"],
+                    "fecha": s["fecha"], "count": s["count"]}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def get_audit_log(self, limit: int = 100) -> dict:
+        """Devuelve el historial de actividad de asignaciones."""
+        try:
+            log = queue_manager.get_manager().get_audit_log(limit)
+            return {"ok": True, "log": log}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 

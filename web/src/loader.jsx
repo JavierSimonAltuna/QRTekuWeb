@@ -174,6 +174,7 @@ const LoaderApp = () => {
           onFinalize={handleFinalize}
           onRefreshPrecintos={handleRefreshPrecintos}
           refreshingPrec={refreshingPrec}
+          onLogout={handleLogout}
         />
       )}
       {screen === "confirming" && item && (
@@ -298,7 +299,7 @@ const WaitingScreen = ({ loader, queuedCount, requesting, onRequest, onLogout })
 // ───────────────────────────────────────────────────────────────
 // Carga asignada (la pantalla principal del cargador)
 // ───────────────────────────────────────────────────────────────
-const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecintos, refreshingPrec }) => {
+const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecintos, refreshingPrec, onLogout }) => {
   const tipoRefr = item.tipo_carga === "REFRIGERADO";
   return (
     <div style={LS.assignRoot}>
@@ -314,6 +315,7 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
           <span style={LS.topBarTicket}>#{item.id}</span>
           <span style={LS.topBarSep}>·</span>
           <span style={LS.topBarQueue}>{queuedCount} en cola</span>
+          <button onClick={onLogout} style={LS.waitLogout}>Cerrar sesión</button>
         </div>
       </div>
 
