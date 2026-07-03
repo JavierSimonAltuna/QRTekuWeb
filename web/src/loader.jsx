@@ -185,7 +185,7 @@ const LoaderApp = () => {
         />
       )}
       {screen === "completing" && (
-        <CompleteScreen info={completedInfo} queuedCount={queuedCount} />
+        <CompleteScreen info={completedInfo} queuedCount={queuedCount} onLogout={handleLogout} />
       )}
 
       {toast && <Toast text={toast} />}
@@ -554,8 +554,11 @@ const ConfirmDialog = ({ item, onCancel, onConfirm }) => (
 // ───────────────────────────────────────────────────────────────
 // Carga completada → siguiente
 // ───────────────────────────────────────────────────────────────
-const CompleteScreen = ({ info, queuedCount }) => (
+const CompleteScreen = ({ info, queuedCount, onLogout }) => (
   <div style={LS.completeRoot}>
+    <div style={{ position: "fixed", top: 16, right: 16, zIndex: 10 }}>
+      <button onClick={onLogout} style={LS.waitLogout}>Cerrar sesión</button>
+    </div>
     <div style={LS.completeCheckWrap}>
       <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ position: "relative", zIndex: 2 }}>
         <polyline points="20 6 9 17 4 12" />
