@@ -109,6 +109,22 @@ const QRTekuApp = () => {
     return () => { alive = false; clearTimeout(tid); };
   }, [connected, tw.autoRefresh, fileInfo]);
 
+  // ── Sincronización inicial: obtener filas actuales del servidor ────────
+  // Funciona tanto en desktop (pywebview) como en navegador/tablet.
+  // 800ms de delay para dejar que pywebview conecte primero si está disponible.
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        const res = await window.api.call("reload_excel");
+        if (res && res.ok) {
+          applyExcelResult(res);
+          refreshExcelSessions();
+        }
+      } catch (_) {}
+    }, 800);
+    return () => clearTimeout(timer);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Info del servidor (IP LAN, URLs) ──────────────────────────────────
   useEffect(() => {
     window.api.call("app_info").then(r => { if (r) setServerInfo(r); }).catch(() => {});
