@@ -227,18 +227,30 @@ class QueueManager:
     def manual_enqueue(self, row: dict, urgente: bool = False) -> dict:
         """Encolar manualmente desde la app supervisor (botón explícito)."""
         with self._lock:
-            # Si ya está en cola, marcar urgente si procede y devolver
             is_combined = bool(row.get("is_combined", False))
+            # Si ya está en cola (queued/assigned/pending_merch), promover y devolver
             for it in self._items:
                 already = (
-                    it["viaje_n"] == row.get("n") and it["status"] in ("queued", "assigned")
+                    it["viaje_n"] == row.get("n")
+                    and it["status"] in ("queued", "assigned", "pending_merch")
                     and (is_combined or it["destino"] == row.get("destino"))
                 )
                 if already:
+                    changed = False
                     if urgente and not it["urgente"]:
                         it["urgente"] = True
+                        changed = True
+                    # Acción explícita del supervisor → promover pending_merch a queued
+                    if it["status"] == "pending_merch":
+                        it["status"] = "queued"
+                        it["mercancia_ok"] = True
+                        changed = True
+                    if changed:
                         self._save()
                     return it
+            # Acción explícita del supervisor → siempre encolar directamente (sin umbral)
+            row = dict(row)
+            row["mercancia_ok"] = True
             item = self._build_item(row, urgente=urgente, source="manual")
             self._items.append(item)
             self._save()
