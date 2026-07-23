@@ -54,6 +54,7 @@ ALLOWED_METHODS = {
     # Útiles desde móvil (lectura)
     "app_info",
     "get_cargas_state",
+    "update_row",
     # Historial Excel y actividad
     "get_excel_sessions",
     "switch_excel_session",

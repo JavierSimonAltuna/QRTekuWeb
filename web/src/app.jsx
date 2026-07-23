@@ -110,34 +110,34 @@ const QRTekuApp = () => {
   }, [connected, tw.autoRefresh, fileInfo]);
 
   // ── Sincronización de cargas desde navegador/tablet ───────────────────
-  // Cuando no hay pywebview (tablet), polling cada 5s con método ligero
-  // (solo memoria, sin releer Excel ni ODBC). Se detiene al desmontar.
-  // En desktop, el auto-refresh de arriba ya se encarga (solo cuando connected=true).
+  // Polling cada 5s. Usa get_cargas_state (ligero, sin ODBC) con fallback
+  // a reload_excel para compatibilidad con servidores antiguos.
+  // En desktop (pywebview) continúa el loop pero no actualiza filas:
+  // el auto-refresh de arriba ya las gestiona con mayor granularidad.
   useEffect(() => {
     let alive = true;
     let tid = null;
     const tick = async () => {
       if (!alive) return;
-      // Evitar doble carga si pywebview ya conectó
-      if (window.pywebview && window.pywebview.api) return;
-      try {
-        const res = await window.api.call("get_cargas_state");
-        if (alive && res && res.ok) {
-          setRows((prev) => {
-            // No sobreescribir si ya hay filas con el mismo count (sin cambios)
-            if (prev.length === res.count && prev.length > 0) return prev;
-            return res.rows;
-          });
-          setFileInfo((prev) => {
-            if (prev) return prev; // no pisar info editada por el usuario
-            return { name: res.filename, count: res.count, fecha: res.fecha_b2, path: res.filename };
-          });
-        }
-      } catch (_) {}
+      const isDesktop = !!(window.pywebview && window.pywebview.api);
+      if (!isDesktop) {
+        try {
+          let res = null;
+          try { res = await window.api.call("get_cargas_state"); } catch (_) {}
+          if (!res || !res.ok) {
+            try { res = await window.api.call("reload_excel"); } catch (_) {}
+          }
+          if (alive && res && res.ok) {
+            setRows(res.rows);
+            setFileInfo((prev) => prev || {
+              name: res.filename, count: res.count, fecha: res.fecha_b2, path: res.filename,
+            });
+          }
+        } catch (_) {}
+      }
       if (alive) tid = setTimeout(tick, 5000);
     };
-    // Primer tick a los 500ms (dejar arrancar pywebview si aplica)
-    tid = setTimeout(tick, 500);
+    tid = setTimeout(tick, 500); // primer tick a 500ms
     return () => { alive = false; clearTimeout(tid); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -219,11 +219,14 @@ const QRTekuApp = () => {
       if (res.ok && res.found) {
         setEditing((e) => ({ ...e, [idx]: { ...e[idx], C: res.cif, E: res.agencia, odbcDone: true, odbcFound: true } }));
         pushToast(`CIF + Agencia: ${res.cif} · ${res.agencia}`, "success");
+        // Sincronizar al servidor para que el otro dispositivo vea el CIF
+        window.api.call("update_row", row.n, { cif: res.cif, agencia: res.agencia }).catch(() => {});
       } else {
         setEditing((e) => ({ ...e, [idx]: { ...e[idx], odbcDone: true, odbcFound: false } }));
         pushToast(`No se encontró ${matricula} en GEZCAM`, "error");
         // marcar la fila como missing-cif
         setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, estado: "missing-cif" } : r)));
+        window.api.call("update_row", row.n, { estado: "missing-cif" }).catch(() => {});
       }
     } catch (err) {
       setLoadingOdbc(false);
@@ -369,6 +372,13 @@ const QRTekuApp = () => {
       return;
     }
     setRows((rs) => rs.map((row, i) => row === r ? { ...row, estado: "done" } : row));
+    // Sincronizar estado "done" al servidor para que el otro dispositivo lo vea
+    window.api.call("update_row", r.n, {
+      estado: "done",
+      cif: state.C || "",
+      agencia: state.E || "",
+      precintos_data: precintos,
+    }).catch(() => {});
     setSelectedIdx(null);
   };
 

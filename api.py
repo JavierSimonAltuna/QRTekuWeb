@@ -281,6 +281,20 @@ class Api:
             "count": len(self._rows),
         }
 
+    def update_row(self, n: str, patch: dict) -> dict:
+        """Actualiza campos de una fila en memoria. Usado para sincronizar estado
+        (CIF, agencia, estado=done, precintos_data) entre dispositivos en tiempo real."""
+        allowed = {"cif", "agencia", "estado", "precintos_data", "muelle", "playa", "matriculas"}
+        patch = {k: v for k, v in (patch or {}).items() if k in allowed}
+        if not patch:
+            return {"ok": True}
+        n = str(n)
+        for row in self._rows:
+            if str(row.get("n", "")) == n:
+                row.update(patch)
+                return {"ok": True}
+        return {"ok": False, "error": "row_not_found"}
+
     def reload_excel(self) -> dict:
         if not self._last_excel_path:
             return {"ok": False, "error": "no_file"}
