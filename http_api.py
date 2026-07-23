@@ -53,6 +53,7 @@ ALLOWED_METHODS = {
     "loader_remove",
     # Útiles desde móvil (lectura)
     "app_info",
+    "get_cargas_state",
     # Historial Excel y actividad
     "get_excel_sessions",
     "switch_excel_session",

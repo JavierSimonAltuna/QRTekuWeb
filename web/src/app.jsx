@@ -109,20 +109,36 @@ const QRTekuApp = () => {
     return () => { alive = false; clearTimeout(tid); };
   }, [connected, tw.autoRefresh, fileInfo]);
 
-  // ── Sincronización inicial: obtener filas actuales del servidor ────────
-  // Funciona tanto en desktop (pywebview) como en navegador/tablet.
-  // 800ms de delay para dejar que pywebview conecte primero si está disponible.
+  // ── Sincronización de cargas desde navegador/tablet ───────────────────
+  // Cuando no hay pywebview (tablet), polling cada 5s con método ligero
+  // (solo memoria, sin releer Excel ni ODBC). Se detiene al desmontar.
+  // En desktop, el auto-refresh de arriba ya se encarga (solo cuando connected=true).
   useEffect(() => {
-    const timer = setTimeout(async () => {
+    let alive = true;
+    let tid = null;
+    const tick = async () => {
+      if (!alive) return;
+      // Evitar doble carga si pywebview ya conectó
+      if (window.pywebview && window.pywebview.api) return;
       try {
-        const res = await window.api.call("reload_excel");
-        if (res && res.ok) {
-          applyExcelResult(res);
-          refreshExcelSessions();
+        const res = await window.api.call("get_cargas_state");
+        if (alive && res && res.ok) {
+          setRows((prev) => {
+            // No sobreescribir si ya hay filas con el mismo count (sin cambios)
+            if (prev.length === res.count && prev.length > 0) return prev;
+            return res.rows;
+          });
+          setFileInfo((prev) => {
+            if (prev) return prev; // no pisar info editada por el usuario
+            return { name: res.filename, count: res.count, fecha: res.fecha_b2, path: res.filename };
+          });
         }
       } catch (_) {}
-    }, 800);
-    return () => clearTimeout(timer);
+      if (alive) tid = setTimeout(tick, 5000);
+    };
+    // Primer tick a los 500ms (dejar arrancar pywebview si aplica)
+    tid = setTimeout(tick, 500);
+    return () => { alive = false; clearTimeout(tid); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Info del servidor (IP LAN, URLs) ──────────────────────────────────

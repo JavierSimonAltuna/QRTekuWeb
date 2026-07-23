@@ -29,6 +29,7 @@ class Api:
     def __init__(self):
         self._window: webview.Window = None
         self._last_excel_path: str = ""
+        self._last_fecha_b2: str = ""
         self._last_payload: dict = {}
         self._last_destino: str = ""
         self._last_precintos: list = []
@@ -93,6 +94,7 @@ class Api:
         try:
             rows, fecha_b2 = core.load_excel(path)
             self._last_excel_path = path
+            self._last_fecha_b2 = fecha_b2
             # Enriquecer las filas aculadas con CIF/Agencia (mejor esfuerzo)
             # y empujarlas a la cola Bleecker automáticamente.
             added = 0
@@ -265,6 +267,19 @@ class Api:
                 except: pass
         except Exception as e:
             return {"ok": False, "error": str(e)}
+
+    def get_cargas_state(self) -> dict:
+        """Devuelve las filas actuales en memoria sin releer el fichero ni hacer ODBC.
+        Usado por tablet/navegador para sincronizar el estado del supervisor en tiempo real."""
+        if not self._rows:
+            return {"ok": False, "error": "no_file"}
+        return {
+            "ok": True,
+            "rows": self._rows,
+            "filename": os.path.basename(self._last_excel_path) if self._last_excel_path else "",
+            "fecha_b2": self._last_fecha_b2 if hasattr(self, "_last_fecha_b2") else "",
+            "count": len(self._rows),
+        }
 
     def reload_excel(self) -> dict:
         if not self._last_excel_path:
