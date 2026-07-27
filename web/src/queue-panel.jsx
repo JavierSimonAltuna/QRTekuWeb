@@ -679,8 +679,8 @@ const QueuePanel = ({ pushToast }) => {
               Sin actividad registrada todavía
             </div>
           ) : auditLog.map((e, i) => {
-            const actionColor = e.action === "asignada" ? "#15803d" : e.action === "finalizada" ? "#0ea5e9" : "#d97706";
-            const actionBg = e.action === "asignada" ? "#dcfce7" : e.action === "finalizada" ? "#dbeafe" : "#fef3c7";
+            const actionColor = e.action === "asignada" ? "#15803d" : e.action === "finalizada" ? "#0ea5e9" : e.action === "encolada" ? "#7c3aed" : "#d97706";
+            const actionBg   = e.action === "asignada" ? "#dcfce7" : e.action === "finalizada" ? "#dbeafe" : e.action === "encolada" ? "#ede9fe" : "#fef3c7";
             return (
               <div key={i} style={{ background: "#fff", border: "1px solid #e7e5e4", borderRadius: 8, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12 }}>
                 <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: actionBg, color: actionColor, textTransform: "uppercase", whiteSpace: "nowrap" }}>

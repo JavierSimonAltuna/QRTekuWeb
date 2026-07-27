@@ -28,8 +28,9 @@ import qr_teku_core as core
 
 
 # ─── Ubicación de la persistencia (mismo directorio que los Word) ──
-QUEUE_FILE = core.SAVE_DIR / "bleecker_queue.json"
+QUEUE_FILE   = core.SAVE_DIR / "bleecker_queue.json"
 LOADERS_FILE = core.SAVE_DIR / "bleecker_loaders.json"
+AUDIT_FILE   = core.SAVE_DIR / "bleecker_audit.json"
 
 
 # ─── Cargadores demo por defecto (editables desde Tweaks) ──────────
@@ -55,6 +56,7 @@ class QueueManager:
         self._audit.append(entry)
         if len(self._audit) > 500:
             self._audit = self._audit[-500:]
+        self._save_audit()
 
     def get_audit_log(self, limit: int = 100) -> list[dict]:
         with self._lock:
@@ -90,11 +92,25 @@ class QueueManager:
         else:
             self._loaders = list(DEFAULT_LOADERS)
             self._save_loaders()
+        if AUDIT_FILE.exists():
+            try:
+                self._audit = json.loads(AUDIT_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                self._audit = []
 
     def _save(self):
         try:
             QUEUE_FILE.write_text(
                 json.dumps({"items": self._items, "counter": self._counter}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    def _save_audit(self):
+        try:
+            AUDIT_FILE.write_text(
+                json.dumps(self._audit[-500:], ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
         except Exception:
@@ -254,6 +270,8 @@ class QueueManager:
             item = self._build_item(row, urgente=urgente, source="manual")
             self._items.append(item)
             self._save()
+            self._add_audit("encolada", item_id=item["id"], destino=item.get("destino"),
+                            viaje_n=item.get("viaje_n"), urgente=urgente)
             return item
 
     def _build_item(self, row: dict, urgente: bool, source: str) -> dict:
