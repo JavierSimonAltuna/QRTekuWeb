@@ -1,4 +1,4 @@
-// PULSO 3.0 · Supervisor de cargas Garvasa
+// PULSO 4.2 · Supervisor de cargas Garvasa
 // preview del Word a la derecha (idéntico al print real).
 
 const { useState, useMemo, useRef, useEffect, useCallback } = React;
@@ -459,7 +459,7 @@ const QRTekuApp = () => {
             <span style={S.logoBar} />
           </div>
           <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: "#fafaf9", letterSpacing: -0.3 }}>PULSO 3.0</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "#fafaf9", letterSpacing: -0.3 }}>PULSO 4.2</span>
             <span style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", letterSpacing: 0.3 }}>Garvasa</span>
           </div>
           {hasFile && (
@@ -745,7 +745,7 @@ const QRTekuApp = () => {
       </div>
 
       {/* Tweaks */}
-      <TweaksPanel title="Tweaks · PULSO 3.0">
+      <TweaksPanel title="Tweaks · PULSO 4.2">
         <TweakSection label="Vista">
           <TweakToggle label="Tabla compacta"   value={tw.denseTable}     onChange={(v) => setTweak("denseTable", v)} />
           <TweakToggle label="Mostrar JSON"     value={tw.showJsonPanel}  onChange={(v) => setTweak("showJsonPanel", v)} />
