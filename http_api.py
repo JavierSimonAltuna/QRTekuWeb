@@ -62,6 +62,10 @@ ALLOWED_METHODS = {
     "get_excel_sessions",
     "switch_excel_session",
     "get_audit_log",
+    # Microsoft Graph API (OneDrive)
+    "graph_get_config",
+    "graph_save_config",
+    "graph_test",
 }
 
 

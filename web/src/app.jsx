@@ -45,6 +45,8 @@ const QRTekuApp = () => {
   const [connected, setConnected] = useState(false);
   const [fileInfo, setFileInfo] = useState(null);
   const [loadingOdbc, setLoadingOdbc] = useState(false);
+  const [showGraphModal, setShowGraphModal] = useState(false);
+  const [graphConfigured, setGraphConfigured] = useState(false);
   const [view, setView] = useState("cargas");  // 'cargas' | 'cola'
   const [queueCounts, setQueueCounts] = useState({ queued: 0, assigned: 0, done: 0 });
   const [excelSessions, setExcelSessions] = useState([]);

@@ -304,6 +304,34 @@ class Api:
         return {"ok": False, "error": "row_not_found"}
 
     def reload_excel(self) -> dict:
+        # ── Microsoft Graph API (OneDrive) ────────────────────────
+        try:
+            import graph_excel as _ge
+            gr = _ge.get_reader()
+            if gr.is_configured():
+                import tempfile as _tmp, os as _os2
+                content, filename = gr.download_bytes()
+                with _tmp.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+                    f.write(content)
+                    tmp_path = f.name
+                try:
+                    saved_path = self._last_excel_path
+                    result = self.load_excel(tmp_path)
+                    self._last_excel_path = saved_path  # restaurar ruta original
+                    if result.get("ok"):
+                        result["filename"] = filename
+                        result["source"] = "graph"
+                    return result
+                finally:
+                    try:
+                        _os2.unlink(tmp_path)
+                    except Exception:
+                        pass
+        except Exception as _ge_err:
+            log("WARNING", "graph_reload_failed", error=str(_ge_err))
+            # Caer al método de disco
+
+        # ── Disco local ───────────────────────────────────────────
         if not self._last_excel_path:
             return {"ok": False, "error": "no_file"}
         if not os.path.exists(self._last_excel_path):
@@ -329,6 +357,39 @@ class Api:
             return {"ok": False, "error": "file_locked"}
         core.clear_chf_caches()   # CIF/agencia siempre frescos; TOULIV1 permanece cacheado
         return self.load_excel(self._last_excel_path)
+
+    # ──────────────────────────────────────────────────────────────
+    # Microsoft Graph API — configuración
+    # ──────────────────────────────────────────────────────────────
+    def graph_get_config(self) -> dict:
+        try:
+            import graph_excel as _ge
+            r = _ge.get_reader()
+            return {"ok": True, "config": r.get_config_safe(), "configured": r.is_configured()}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def graph_save_config(self, cfg: dict) -> dict:
+        try:
+            import graph_excel as _ge
+            r = _ge.get_reader()
+            r.save_config(cfg)
+            log("INFO", "graph_config_saved", enabled=cfg.get("enabled"))
+            return {"ok": True, "configured": r.is_configured()}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def graph_test(self) -> dict:
+        try:
+            import graph_excel as _ge
+            r = _ge.get_reader()
+            if not r.is_configured():
+                return {"ok": False, "error": "No configurado o desactivado"}
+            content, filename = r.download_bytes()
+            return {"ok": True, "bytes": len(content), "filename": filename}
+        except Exception as e:
+            log_exc("graph_test", e)
+            return {"ok": False, "error": str(e)}
 
     # ──────────────────────────────────────────────────────────────
     # ODBC: lookup CIF/Agencia
