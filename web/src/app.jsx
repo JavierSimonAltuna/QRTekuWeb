@@ -46,6 +46,7 @@ const QRTekuApp = () => {
   const [fileInfo, setFileInfo] = useState(null);
   const [loadingOdbc, setLoadingOdbc] = useState(false);
   const [showGraphModal, setShowGraphModal] = useState(false);
+  const [showGraphPicker, setShowGraphPicker] = useState(false);
   const [graphConfigured, setGraphConfigured] = useState(false);
   const [view, setView] = useState("cargas");  // 'cargas' | 'cola'
   const [queueCounts, setQueueCounts] = useState({ queued: 0, assigned: 0, done: 0 });
@@ -508,11 +509,14 @@ const QRTekuApp = () => {
           )}
           <span style={S.topDivider} />
           {graphConfigured && (
-            <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 8px", background: "rgba(14,165,233,0.15)", border: "1px solid rgba(14,165,233,0.3)", borderRadius: 6 }}
-              title="Leyendo Excel desde SharePoint · Microsoft 365">
+            <button
+              onClick={() => setShowGraphPicker(true)}
+              style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 10px", background: "rgba(14,165,233,0.15)", border: "1px solid rgba(14,165,233,0.3)", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}
+              title="Importar plan de carga desde SharePoint"
+            >
               <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#38bdf8" }} />
               <span style={{ fontSize: 11, color: "#7dd3fc", fontWeight: 600 }}>SharePoint</span>
-            </div>
+            </button>
           )}
           <div style={S.connStatus}>
             <span style={{ width: 7, height: 7, borderRadius: "50%", background: connected ? "#22c55e" : "#a8a29e", boxShadow: connected ? "0 0 0 3px rgba(34,197,94,0.18)" : "none" }} />
@@ -785,11 +789,25 @@ const QRTekuApp = () => {
         </TweakSection>
       </TweaksPanel>
 
-      {/* Modal Graph / SharePoint */}
+      {/* Modal Graph / SharePoint config */}
       {showGraphModal && (
         <GraphConfigModal
           onClose={() => setShowGraphModal(false)}
           onSaved={(configured) => { setGraphConfigured(configured); }}
+          pushToast={pushToast}
+        />
+      )}
+
+      {/* Modal picker de archivos SharePoint */}
+      {showGraphPicker && (
+        <GraphFilePicker
+          onClose={() => setShowGraphPicker(false)}
+          onLoaded={(res) => {
+            applyExcelResult(res);
+            pushToast(`${res.count} filas cargadas · ${res.filename}`, "success");
+            refreshExcelSessions();
+            setShowGraphPicker(false);
+          }}
           pushToast={pushToast}
         />
       )}
@@ -802,20 +820,20 @@ const QRTekuApp = () => {
 // ───────────────────────────────────────────────────────────────────
 const GraphConfigModal = ({ onClose, onSaved, pushToast }) => {
   const [cfg, setCfg] = useState({
-    enabled: false, mode: "sharepoint",
+    enabled: false, mode: "sharepoint", source: "folder",
     tenant_id: "", client_id: "", client_secret: "",
-    sharepoint_url: "", site_path: "", file_path: "",
+    sharepoint_url: "", site_path: "", folder_path: "", file_path: "",
     user_email: "", drive_id: "", item_id: "",
   });
   const [loading, setLoading] = useState(true);
   const [testing, setTesting] = useState(false);
+  const [testFiles, setTestFiles] = useState(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     window.api.call("graph_get_config").then(r => {
-      if (r && r.ok && r.config && Object.keys(r.config).length) {
+      if (r && r.ok && r.config && Object.keys(r.config).length)
         setCfg(prev => ({ ...prev, ...r.config }));
-      }
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
@@ -825,39 +843,29 @@ const GraphConfigModal = ({ onClose, onSaved, pushToast }) => {
     setSaving(true);
     try {
       const r = await window.api.call("graph_save_config", cfg);
-      if (r.ok) {
-        pushToast("Configuración guardada", "success");
-        onSaved(r.configured);
-        onClose();
-      } else {
-        pushToast(r.error || "Error guardando", "error");
-      }
-    } catch (e) {
-      pushToast(String(e), "error");
-    } finally {
-      setSaving(false);
-    }
+      if (r.ok) { pushToast("Configuración guardada", "success"); onSaved(r.configured); onClose(); }
+      else pushToast(r.error || "Error guardando", "error");
+    } catch (e) { pushToast(String(e), "error"); }
+    finally { setSaving(false); }
   };
 
   const handleTest = async () => {
-    setTesting(true);
+    setTesting(true); setTestFiles(null);
     try {
       const r = await window.api.call("graph_test");
       if (r.ok) {
-        pushToast(`Conexión OK · ${r.filename} (${(r.bytes / 1024).toFixed(0)} KB)`, "success");
+        setTestFiles(r.files || []);
+        pushToast(`Conexión OK · ${r.count} archivo(s) encontrado(s)`, "success");
       } else {
         pushToast(`Error: ${r.error}`, "error");
       }
-    } catch (e) {
-      pushToast(String(e), "error");
-    } finally {
-      setTesting(false);
-    }
+    } catch (e) { pushToast(String(e), "error"); }
+    finally { setTesting(false); }
   };
 
   const IS = {
     overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center" },
-    box: { background: "#fff", borderRadius: 12, width: 480, maxWidth: "95vw", maxHeight: "90vh", overflow: "auto", boxShadow: "0 8px 40px rgba(0,0,0,0.18)", fontFamily: "inherit" },
+    box: { background: "#fff", borderRadius: 12, width: 520, maxWidth: "95vw", maxHeight: "90vh", overflow: "auto", boxShadow: "0 8px 40px rgba(0,0,0,0.18)", fontFamily: "inherit" },
     head: { padding: "18px 22px 14px", borderBottom: "1px solid #e7e5e4", display: "flex", alignItems: "center", justifyContent: "space-between" },
     title: { fontSize: 15, fontWeight: 700, color: "#1c1917" },
     body: { padding: "18px 22px" },
@@ -869,9 +877,10 @@ const GraphConfigModal = ({ onClose, onSaved, pushToast }) => {
     btn: (color) => ({ padding: "7px 16px", borderRadius: 7, border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit", background: color, color: "#fff" }),
     btnGhost: { padding: "7px 16px", borderRadius: 7, border: "1px solid #d6d3d1", background: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit", color: "#44403c" },
     toggleRow: { display: "flex", alignItems: "center", gap: 10, marginBottom: 14 },
-    modeRow: { display: "flex", gap: 8, marginBottom: 14 },
-    modeBtn: (active) => ({ flex: 1, padding: "7px 0", borderRadius: 7, border: `1px solid ${active ? "#0ea5e9" : "#d6d3d1"}`, background: active ? "#e0f2fe" : "#fff", color: active ? "#0369a1" : "#57534e", fontWeight: 600, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }),
+    segRow: { display: "flex", gap: 0, marginBottom: 14, border: "1px solid #d6d3d1", borderRadius: 7, overflow: "hidden" },
+    segBtn: (active) => ({ flex: 1, padding: "7px 0", border: "none", borderRight: "1px solid #d6d3d1", background: active ? "#0ea5e9" : "#fff", color: active ? "#fff" : "#57534e", fontWeight: 600, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }),
     section: { fontSize: 11, fontWeight: 700, color: "#a8a29e", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10, paddingTop: 4 },
+    fileRow: { padding: "7px 10px", borderBottom: "1px solid #f5f5f4", fontSize: 12.5, color: "#1c1917", display: "flex", justifyContent: "space-between", alignItems: "center" },
   };
 
   if (loading) return (
@@ -879,6 +888,12 @@ const GraphConfigModal = ({ onClose, onSaved, pushToast }) => {
       <div style={{ ...IS.box, padding: 32, textAlign: "center", color: "#a8a29e" }}>Cargando…</div>
     </div>
   );
+
+  const fmtDate = (s) => {
+    if (!s) return "";
+    try { return new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); }
+    catch { return s; }
+  };
 
   return (
     <div style={IS.overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -894,13 +909,6 @@ const GraphConfigModal = ({ onClose, onSaved, pushToast }) => {
             <label htmlFor="g-enabled" style={{ fontSize: 13.5, fontWeight: 600, color: "#1c1917", cursor: "pointer" }}>
               Activar lectura desde SharePoint
             </label>
-          </div>
-
-          {/* Modo */}
-          <div style={IS.section}>Modo</div>
-          <div style={IS.modeRow}>
-            <button style={IS.modeBtn(cfg.mode === "sharepoint")} onClick={() => set("mode", "sharepoint")}>SharePoint (recomendado)</button>
-            <button style={IS.modeBtn(cfg.mode === "graph")} onClick={() => set("mode", "graph")}>OneDrive Graph</button>
           </div>
 
           {/* Credenciales Azure */}
@@ -920,37 +928,40 @@ const GraphConfigModal = ({ onClose, onSaved, pushToast }) => {
             <div style={IS.hint}>Certificados y secretos → Nuevo secreto → copiar valor</div>
           </div>
 
-          {/* SharePoint */}
-          {cfg.mode === "sharepoint" && (<>
-            <div style={IS.section}>Ubicación del archivo</div>
-            <div style={IS.row}>
-              <label style={IS.label}>URL de SharePoint</label>
-              <input style={IS.input} value={cfg.sharepoint_url} onChange={e => set("sharepoint_url", e.target.value)} placeholder="https://garvasa.sharepoint.com" />
-            </div>
-            <div style={IS.row}>
-              <label style={IS.label}>Ruta del sitio (site path)</label>
-              <input style={IS.input} value={cfg.site_path} onChange={e => set("site_path", e.target.value)} placeholder="/sites/Logistica  (vacío = sitio raíz)" />
-              <div style={IS.hint}>Parte de la URL entre el host y la biblioteca</div>
-            </div>
-            <div style={IS.row}>
-              <label style={IS.label}>Ruta del archivo</label>
-              <input style={IS.input} value={cfg.file_path} onChange={e => set("file_path", e.target.value)} placeholder="/Documentos compartidos/Cargas.xlsx" />
-              <div style={IS.hint}>Ruta relativa al sitio, incluyendo biblioteca y carpetas</div>
-            </div>
-          </>)}
+          {/* Ubicación SharePoint */}
+          <div style={IS.section}>Ubicación en SharePoint</div>
+          <div style={IS.row}>
+            <label style={IS.label}>URL de SharePoint</label>
+            <input style={IS.input} value={cfg.sharepoint_url} onChange={e => set("sharepoint_url", e.target.value)} placeholder="https://garvasalogistica.sharepoint.com" />
+          </div>
+          <div style={IS.row}>
+            <label style={IS.label}>Ruta del sitio</label>
+            <input style={IS.input} value={cfg.site_path} onChange={e => set("site_path", e.target.value)} placeholder="/sites/DatosGarvasa" />
+            <div style={IS.hint}>Vacío = sitio raíz</div>
+          </div>
+          <div style={IS.row}>
+            <label style={IS.label}>Carpeta de planes de carga</label>
+            <input style={IS.input} value={cfg.folder_path} onChange={e => set("folder_path", e.target.value)} placeholder="/Documentos compartidos/Expediciones/PLAN DE CARGA" />
+            <div style={IS.hint}>Ruta relativa al sitio — el archivo concreto se elige al importar</div>
+          </div>
 
-          {/* OneDrive Graph */}
-          {cfg.mode === "graph" && (<>
-            <div style={IS.section}>Ubicación del archivo (OneDrive)</div>
-            <div style={IS.row}>
-              <label style={IS.label}>Email del usuario</label>
-              <input style={IS.input} value={cfg.user_email} onChange={e => set("user_email", e.target.value)} placeholder="usuario@garvasa.com" />
+          {/* Resultado del test */}
+          {testFiles !== null && (
+            <div style={{ marginTop: 8, border: "1px solid #e7e5e4", borderRadius: 8, overflow: "hidden" }}>
+              <div style={{ padding: "7px 10px", background: "#f5f5f4", fontSize: 11.5, fontWeight: 700, color: "#57534e" }}>
+                Archivos encontrados en la carpeta
+              </div>
+              {testFiles.length === 0 && (
+                <div style={{ ...IS.fileRow, color: "#a8a29e" }}>Sin archivos .xlsx</div>
+              )}
+              {testFiles.slice(0, 8).map((f, i) => (
+                <div key={i} style={IS.fileRow}>
+                  <span>{f.name}</span>
+                  <span style={{ fontSize: 11, color: "#a8a29e" }}>{fmtDate(f.modified)} · {f.size_kb} KB</span>
+                </div>
+              ))}
             </div>
-            <div style={IS.row}>
-              <label style={IS.label}>Ruta en OneDrive</label>
-              <input style={IS.input} value={cfg.file_path} onChange={e => set("file_path", e.target.value)} placeholder="/Documentos/Cargas.xlsx" />
-            </div>
-          </>)}
+          )}
         </div>
         <div style={IS.footer}>
           <button onClick={handleTest} disabled={testing} style={{ ...IS.btnGhost, opacity: testing ? 0.6 : 1 }}>
@@ -960,6 +971,82 @@ const GraphConfigModal = ({ onClose, onSaved, pushToast }) => {
           <button onClick={handleSave} disabled={saving} style={{ ...IS.btn("#0ea5e9"), opacity: saving ? 0.6 : 1 }}>
             {saving ? "Guardando…" : "Guardar"}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ───────────────────────────────────────────────────────────────────
+// SharePoint file picker
+// ───────────────────────────────────────────────────────────────────
+const GraphFilePicker = ({ onClose, onLoaded, pushToast }) => {
+  const [files, setFiles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingFile, setLoadingFile] = useState("");
+
+  useEffect(() => {
+    window.api.call("graph_list_files").then(r => {
+      if (r.ok) setFiles(r.files || []);
+      else pushToast(r.error || "Error listando archivos", "error");
+    }).catch(e => pushToast(String(e), "error"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handlePick = async (f) => {
+    setLoadingFile(f.server_url);
+    try {
+      const r = await window.api.call("graph_load_file", f.server_url);
+      if (r.ok) onLoaded(r);
+      else pushToast(r.error || "Error cargando", "error");
+    } catch (e) { pushToast(String(e), "error"); }
+    finally { setLoadingFile(""); }
+  };
+
+  const fmtDate = (s) => {
+    if (!s) return "";
+    try { return new Date(s).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); }
+    catch { return s; }
+  };
+
+  const PS = {
+    overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9100, display: "flex", alignItems: "center", justifyContent: "center" },
+    box: { background: "#fff", borderRadius: 12, width: 540, maxWidth: "95vw", maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,0.18)", fontFamily: "inherit" },
+    head: { padding: "16px 20px 12px", borderBottom: "1px solid #e7e5e4", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 },
+    list: { flex: 1, overflow: "auto" },
+    row: (active) => ({ padding: "10px 18px", borderBottom: "1px solid #f5f5f4", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", background: active ? "#f0f9ff" : "#fff", transition: "background 0.1s" }),
+    name: { fontSize: 13.5, fontWeight: 600, color: "#1c1917" },
+    meta: { fontSize: 11, color: "#a8a29e", marginTop: 2 },
+    loadBtn: { padding: "5px 14px", borderRadius: 6, border: "none", background: "#0ea5e9", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 },
+  };
+
+  return (
+    <div style={PS.overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div style={PS.box}>
+        <div style={PS.head}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#1c1917" }}>Importar plan de carga</div>
+            <div style={{ fontSize: 11.5, color: "#a8a29e", marginTop: 2 }}>Selecciona el archivo de SharePoint</div>
+          </div>
+          <button onClick={onClose} style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 18, color: "#78716c", lineHeight: 1 }}>×</button>
+        </div>
+        <div style={PS.list}>
+          {loading && <div style={{ padding: 32, textAlign: "center", color: "#a8a29e" }}>Cargando lista…</div>}
+          {!loading && files.length === 0 && <div style={{ padding: 32, textAlign: "center", color: "#a8a29e" }}>Sin archivos .xlsx en la carpeta</div>}
+          {files.map((f, i) => {
+            const busy = loadingFile === f.server_url;
+            return (
+              <div key={i} style={PS.row(busy)} onClick={() => !loadingFile && handlePick(f)}>
+                <div>
+                  <div style={PS.name}>{f.name}</div>
+                  <div style={PS.meta}>{fmtDate(f.modified)} · {f.size_kb} KB</div>
+                </div>
+                <button style={{ ...PS.loadBtn, opacity: loadingFile && !busy ? 0.4 : 1 }} disabled={!!loadingFile} onClick={e => { e.stopPropagation(); handlePick(f); }}>
+                  {busy ? "Cargando…" : "Abrir"}
+                </button>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

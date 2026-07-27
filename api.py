@@ -39,6 +39,7 @@ class Api:
         self._excel_sessions: list = []  # historial de Excels cargados (máx 3)
         self._ip_lan: str = "127.0.0.1"
         self._port: int = 8765
+        self._graph_server_url: str = ""  # ServerRelativeUrl del archivo SP activo
 
     def set_server_info(self, ip_lan: str, port: int):
         self._ip_lan = ip_lan
@@ -304,32 +305,33 @@ class Api:
         return {"ok": False, "error": "row_not_found"}
 
     def reload_excel(self) -> dict:
-        # ── Microsoft Graph API (OneDrive) ────────────────────────
-        try:
-            import graph_excel as _ge
-            gr = _ge.get_reader()
-            if gr.is_configured():
-                import tempfile as _tmp, os as _os2
-                content, filename = gr.download_bytes()
-                with _tmp.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
-                    f.write(content)
-                    tmp_path = f.name
-                try:
-                    saved_path = self._last_excel_path
-                    result = self.load_excel(tmp_path)
-                    self._last_excel_path = saved_path  # restaurar ruta original
-                    if result.get("ok"):
-                        result["filename"] = filename
-                        result["source"] = "graph"
-                    return result
-                finally:
+        # ── SharePoint / Graph API ─────────────────────────────────
+        # Solo si hay un archivo SP activo (seleccionado por el usuario via graph_load_file)
+        if self._graph_server_url:
+            try:
+                import graph_excel as _ge
+                gr = _ge.get_reader()
+                if gr.is_configured():
+                    import tempfile as _tmp, os as _os2
+                    content, filename = gr.download_bytes(self._graph_server_url)
+                    with _tmp.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+                        f.write(content)
+                        tmp_path = f.name
                     try:
-                        _os2.unlink(tmp_path)
-                    except Exception:
-                        pass
-        except Exception as _ge_err:
-            log("WARNING", "graph_reload_failed", error=str(_ge_err))
-            # Caer al método de disco
+                        saved_path = self._last_excel_path
+                        result = self.load_excel(tmp_path)
+                        self._last_excel_path = saved_path
+                        if result.get("ok"):
+                            result["filename"] = filename
+                            result["source"] = "sharepoint"
+                        return result
+                    finally:
+                        try:
+                            _os2.unlink(tmp_path)
+                        except Exception:
+                            pass
+            except Exception as _ge_err:
+                log("WARNING", "graph_reload_failed", error=str(_ge_err))
 
         # ── Disco local ───────────────────────────────────────────
         if not self._last_excel_path:
@@ -365,7 +367,12 @@ class Api:
         try:
             import graph_excel as _ge
             r = _ge.get_reader()
-            return {"ok": True, "config": r.get_config_safe(), "configured": r.is_configured()}
+            return {
+                "ok": True,
+                "config": r.get_config_safe(),
+                "configured": r.is_configured(),
+                "active_file": self._graph_server_url.rsplit("/", 1)[-1] if self._graph_server_url else "",
+            }
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
@@ -374,21 +381,65 @@ class Api:
             import graph_excel as _ge
             r = _ge.get_reader()
             r.save_config(cfg)
+            self._graph_server_url = ""  # resetear al cambiar config
             log("INFO", "graph_config_saved", enabled=cfg.get("enabled"))
             return {"ok": True, "configured": r.is_configured()}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
     def graph_test(self) -> dict:
+        """Prueba autenticación + lista los archivos de la carpeta."""
         try:
             import graph_excel as _ge
             r = _ge.get_reader()
             if not r.is_configured():
                 return {"ok": False, "error": "No configurado o desactivado"}
-            content, filename = r.download_bytes()
-            return {"ok": True, "bytes": len(content), "filename": filename}
+            files = r.list_folder_files()
+            return {"ok": True, "files": files, "count": len(files)}
         except Exception as e:
             log_exc("graph_test", e)
+            return {"ok": False, "error": str(e)}
+
+    def graph_list_files(self) -> dict:
+        """Lista los .xlsx de la carpeta SharePoint configurada."""
+        try:
+            import graph_excel as _ge
+            r = _ge.get_reader()
+            if not r.is_configured():
+                return {"ok": False, "error": "No configurado"}
+            files = r.list_folder_files()
+            return {"ok": True, "files": files, "active": self._graph_server_url}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def graph_load_file(self, server_url: str) -> dict:
+        """Descarga y carga un Excel de SharePoint por su ServerRelativeUrl."""
+        try:
+            import graph_excel as _ge, tempfile as _tmp, os as _os2
+            r = _ge.get_reader()
+            if not r.is_configured():
+                return {"ok": False, "error": "No configurado"}
+            content, filename = r.download_bytes(server_url)
+            with _tmp.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+                f.write(content)
+                tmp_path = f.name
+            try:
+                saved_path = self._last_excel_path
+                result = self.load_excel(tmp_path)
+                self._last_excel_path = saved_path
+                if result.get("ok"):
+                    self._graph_server_url = server_url
+                    result["filename"] = filename
+                    result["source"] = "sharepoint"
+                    log("INFO", "graph_load_file", file=filename)
+                return result
+            finally:
+                try:
+                    _os2.unlink(tmp_path)
+                except Exception:
+                    pass
+        except Exception as e:
+            log_exc("graph_load_file", e)
             return {"ok": False, "error": str(e)}
 
     # ──────────────────────────────────────────────────────────────

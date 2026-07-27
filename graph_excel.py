@@ -1,10 +1,16 @@
 """
 PULSO · Lector de Excel desde SharePoint / OneDrive via API.
 
-Modos
------
-sharepoint  Usa la API REST de SharePoint  → permiso Sites.FullControl.All (ya concedido)
-graph       Usa Microsoft Graph             → permiso Files.Read.All (requiere añadirlo)
+Modos de conexión
+-----------------
+sharepoint  API REST de SharePoint  → permiso Sites.FullControl.All (ya concedido)
+graph       Microsoft Graph          → permiso Files.Read.All
+
+Fuente (source)
+---------------
+file    Archivo fijo en una ruta conocida
+folder  Carpeta: PULSO lista los .xlsx y coge el más reciente (útil cuando
+        el archivo cambia cada día, ej. "PLAN CARGA DD-MM-YYYY.xlsx")
 
 Config guardada en: Documents/QRTeku/QR_WORDS/graph_config.json
 
@@ -12,15 +18,22 @@ Campos comunes
 --------------
   enabled       bool   — activar
   mode          str    — "sharepoint" | "graph"
+  source        str    — "file" | "folder"
   tenant_id     str    — ID del directorio Azure
   client_id     str    — ID de la aplicación
   client_secret str    — Secreto de cliente
 
-Modo sharepoint
----------------
-  sharepoint_url  str  — ej. "https://garvasa.sharepoint.com"
-  site_path       str  — ej. "/sites/Logistica"  (vacío = sitio raíz)
-  file_path       str  — ruta relativa al sitio, ej. "/Documentos compartidos/Cargas.xlsx"
+Modo sharepoint + source=file
+-----------------------------
+  sharepoint_url  str  — ej. "https://garvasalogistica.sharepoint.com"
+  site_path       str  — ej. "/sites/DatosGarvasa"
+  file_path       str  — ruta relativa al sitio, ej. "/Documentos compartidos/Expediciones/Cargas.xlsx"
+
+Modo sharepoint + source=folder
+--------------------------------
+  sharepoint_url  str  — ej. "https://garvasalogistica.sharepoint.com"
+  site_path       str  — ej. "/sites/DatosGarvasa"
+  folder_path     str  — carpeta con los Excels, ej. "/Documentos compartidos/Expediciones/PLAN DE CARGA"
 
 Modo graph (OneDrive)
 ---------------------
@@ -82,9 +95,14 @@ class GraphExcelReader:
             return False
         if not all(self._cfg.get(k) for k in _REQUIRED):
             return False
-        mode = self._cfg.get("mode", "sharepoint")
+        mode   = self._cfg.get("mode",   "sharepoint")
+        source = self._cfg.get("source", "file")
         if mode == "sharepoint":
-            return bool(self._cfg.get("sharepoint_url") and self._cfg.get("file_path"))
+            if not self._cfg.get("sharepoint_url"):
+                return False
+            if source == "folder":
+                return bool(self._cfg.get("folder_path"))
+            return bool(self._cfg.get("file_path"))
         # graph / OneDrive
         return bool(self._cfg.get("item_id") or self._cfg.get("file_path"))
 
@@ -107,35 +125,71 @@ class GraphExcelReader:
             raise RuntimeError(f"Token error: {err}")
         return result["access_token"]
 
-    # ──────────────────────── Descarga SharePoint ────────────────────────
+    # ──────────────────────── SharePoint helpers ────────────────────────
 
-    def _download_sharepoint(self) -> tuple[bytes, str]:
-        sp_url   = self._cfg["sharepoint_url"].rstrip("/")
-        site_path = self._cfg.get("site_path", "").rstrip("/")
-        file_path = self._cfg.get("file_path", "")
-        if not file_path.startswith("/"):
-            file_path = "/" + file_path
+    def _sp_token(self) -> str:
+        sp_url = self._cfg["sharepoint_url"].rstrip("/")
+        return self._get_token(f"{sp_url}/.default")
 
-        # Ruta relativa al servidor: /sites/X/Documentos/Archivo.xlsx
-        server_rel = site_path + file_path
+    def _sp_headers(self) -> dict:
+        return {
+            "Authorization": f"Bearer {self._sp_token()}",
+            "Accept": "application/json;odata=nometadata",
+        }
 
-        # Token con scope de SharePoint (Sites.FullControl.All)
-        scope = f"{sp_url}/.default"
-        token = self._get_token(scope)
-
+    def list_folder_files(self) -> list[dict]:
+        """Lista los .xlsx de la carpeta configurada, ordenados por fecha desc.
+        Devuelve [{name, server_url, modified, size_kb}]."""
         import requests as _req
-        encoded = _req.utils.quote(server_rel)
+        sp_url    = self._cfg["sharepoint_url"].rstrip("/")
+        site_path = self._cfg.get("site_path", "").rstrip("/")
+        folder    = self._cfg.get("folder_path", "")
+        server_rel_folder = site_path + folder
+
         url = (
             f"{sp_url}{site_path}/_api/web/"
-            f"GetFileByServerRelativePath(decodedurl='{server_rel}')/$value"
+            f"GetFolderByServerRelativePath(decodedurl='{server_rel_folder}')/Files"
+            f"?$orderby=TimeLastModified desc&$top=50"
+            f"&$select=Name,ServerRelativeUrl,TimeLastModified,Length"
+        )
+        r = _req.get(url, headers=self._sp_headers(), timeout=30)
+        r.raise_for_status()
+        files = r.json().get("value", [])
+        result = []
+        for f in files:
+            if f["Name"].lower().endswith((".xlsx", ".xls")):
+                result.append({
+                    "name":       f["Name"],
+                    "server_url": f["ServerRelativeUrl"],
+                    "modified":   f.get("TimeLastModified", ""),
+                    "size_kb":    round(int(f.get("Length", 0)) / 1024, 1),
+                })
+        return result
+
+    def download_by_server_url(self, server_url: str) -> tuple[bytes, str]:
+        """Descarga un archivo por su ServerRelativeUrl de SharePoint."""
+        import requests as _req
+        sp_url    = self._cfg["sharepoint_url"].rstrip("/")
+        site_path = self._cfg.get("site_path", "").rstrip("/")
+        url = (
+            f"{sp_url}{site_path}/_api/web/"
+            f"GetFileByServerRelativePath(decodedurl='{server_url}')/$value"
         )
         r = _req.get(url, headers={
-            "Authorization": f"Bearer {token}",
+            "Authorization": f"Bearer {self._sp_token()}",
             "Accept": "application/octet-stream",
         }, timeout=30)
         r.raise_for_status()
-        filename = server_rel.rsplit("/", 1)[-1]
+        filename = server_url.rsplit("/", 1)[-1]
         return r.content, filename
+
+    # ──────────────────────── Descarga SharePoint (archivo fijo) ────────────────────────
+
+    def _download_sharepoint_file(self) -> tuple[bytes, str]:
+        site_path = self._cfg.get("site_path", "").rstrip("/")
+        file_path = self._cfg.get("file_path", "")
+        server_rel = site_path + ("/" + file_path.lstrip("/"))
+        return self.download_by_server_url(server_rel)
 
     # ──────────────────────── Descarga Graph / OneDrive ────────────────────────
 
@@ -169,11 +223,16 @@ class GraphExcelReader:
 
     # ──────────────────────── API pública ────────────────────────
 
-    def download_bytes(self) -> tuple[bytes, str]:
-        """Descarga el Excel y devuelve (bytes, filename)."""
-        mode = self._cfg.get("mode", "sharepoint")
+    def download_bytes(self, server_url: str = "") -> tuple[bytes, str]:
+        """Descarga el Excel y devuelve (bytes, filename).
+        server_url: si se pasa, descarga ese archivo concreto (modo carpeta).
+        """
+        mode   = self._cfg.get("mode",   "sharepoint")
+        source = self._cfg.get("source", "file")
         if mode == "sharepoint":
-            return self._download_sharepoint()
+            if server_url:
+                return self.download_by_server_url(server_url)
+            return self._download_sharepoint_file()
         return self._download_graph()
 
 
