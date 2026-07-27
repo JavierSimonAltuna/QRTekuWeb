@@ -857,6 +857,9 @@ const GraphConfigModal = ({ onClose, onSaved, pushToast }) => {
   const handleTest = async () => {
     setTesting(true); setTestFiles(null);
     try {
+      // Save current form values first so the backend has them before testing
+      const saveR = await window.api.call("graph_save_config", cfg);
+      if (!saveR.ok) { pushToast(`Error guardando: ${saveR.error}`, "error"); return; }
       const r = await window.api.call("graph_test");
       if (r.ok) {
         setTestFiles(r.files || []);
