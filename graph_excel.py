@@ -1,16 +1,19 @@
 """
-PULSO · Lector de Excel desde SharePoint / OneDrive via API.
+PULSO · Lector de Excel desde SharePoint / OneDrive via Microsoft Graph API.
+
+Todos los accesos a SharePoint usan Microsoft Graph API (más moderna y fiable
+que la SharePoint REST API legacy). Requiere permiso:
+  Sites.Read.All  (Microsoft Graph · Application) + admin consent
 
 Modos de conexión
 -----------------
-sharepoint  API REST de SharePoint  → permiso Sites.FullControl.All (ya concedido)
-graph       Microsoft Graph          → permiso Files.Read.All
+sharepoint  SharePoint via Graph API  → Sites.Read.All
+graph       OneDrive via Graph API    → Files.Read.All o Sites.Read.All
 
 Fuente (source)
 ---------------
 file    Archivo fijo en una ruta conocida
-folder  Carpeta: PULSO lista los .xlsx y coge el más reciente (útil cuando
-        el archivo cambia cada día, ej. "PLAN CARGA DD-MM-YYYY.xlsx")
+folder  Carpeta: PULSO lista los .xlsx y el usuario elige cuál cargar
 
 Config guardada en: Documents/QRTeku/QR_WORDS/graph_config.json
 
@@ -27,7 +30,7 @@ Modo sharepoint + source=file
 -----------------------------
   sharepoint_url  str  — ej. "https://garvasalogistica.sharepoint.com"
   site_path       str  — ej. "/sites/DatosGarvasa"
-  file_path       str  — ruta relativa al sitio, ej. "/Documentos compartidos/Expediciones/Cargas.xlsx"
+  file_path       str  — ruta relativa a la raíz del drive, ej. "/Documentos compartidos/Cargas.xlsx"
 
 Modo sharepoint + source=folder
 --------------------------------
@@ -44,14 +47,17 @@ Modo graph (OneDrive)
 """
 
 import json
-import os
-import tempfile
 
 import qr_teku_core as core
 from app_logger import log, log_exc
 
 CONFIG_FILE = core.SAVE_DIR / "graph_config.json"
+GRAPH = "https://graph.microsoft.com/v1.0"
+GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 _REQUIRED = ("tenant_id", "client_id", "client_secret")
+
+# Prefijo interno para referencias de archivo vía Graph API
+_GRAPH_REF_PREFIX = "__graph__"
 
 
 class GraphExcelReader:
@@ -125,49 +131,74 @@ class GraphExcelReader:
             raise RuntimeError(f"Token error: {err}")
         return result["access_token"]
 
-    # ──────────────────────── SharePoint helpers ────────────────────────
+    def _graph_headers(self) -> dict:
+        return {"Authorization": f"Bearer {self._get_token(GRAPH_SCOPE)}"}
 
-    def _sp_token(self) -> str:
-        sp_url = self._cfg["sharepoint_url"].rstrip("/")
-        return self._get_token(f"{sp_url}/.default")
+    # ──────────────────────── SharePoint via Graph API ────────────────────────
 
-    def _sp_headers(self) -> dict:
-        return {
-            "Authorization": f"Bearer {self._sp_token()}",
-            "Accept": "application/json;odata=nometadata",
-        }
-
-    def list_folder_files(self) -> list[dict]:
-        """Lista los .xlsx de la carpeta configurada, ordenados por fecha desc.
-        Devuelve [{name, server_url, modified, size_kb}]."""
+    def _get_site_id(self) -> str:
+        """Obtiene el ID del site de SharePoint usando Graph API."""
         import requests as _req
         sp_url    = self._cfg["sharepoint_url"].rstrip("/")
-        site_path = self._cfg.get("site_path", "").rstrip("/")
-        folder    = self._cfg.get("folder_path", "")
-        server_rel_folder = site_path + folder
+        host      = sp_url.split("://")[-1]  # garvasalogistica.sharepoint.com
+        site_path = self._cfg.get("site_path", "").strip("/")  # sites/DatosGarvasa
 
-        url = (
-            f"{sp_url}{site_path}/_api/web/"
-            f"GetFolderByServerRelativePath(decodedurl='{server_rel_folder}')/Files"
-            f"?$orderby=TimeLastModified desc&$top=50"
-            f"&$select=Name,ServerRelativeUrl,TimeLastModified,Length"
-        )
-        r = _req.get(url, headers=self._sp_headers(), timeout=30)
+        url = f"{GRAPH}/sites/{host}:/{site_path}" if site_path else f"{GRAPH}/sites/{host}"
+        r = _req.get(url, headers=self._graph_headers(), timeout=30)
         r.raise_for_status()
-        files = r.json().get("value", [])
+        return r.json()["id"]
+
+    def list_folder_files(self) -> list[dict]:
+        """Lista los .xlsx de la carpeta configurada via Graph API.
+        Devuelve [{name, server_url, modified, size_kb}]."""
+        import requests as _req
+        site_id    = self._get_site_id()
+        folder     = self._cfg.get("folder_path", "").strip("/")
+
+        url = f"{GRAPH}/sites/{site_id}/drive/root:/{folder}:/children"
+        r = _req.get(url, headers=self._graph_headers(),
+                     params={"$orderby": "lastModifiedDateTime desc", "$top": "50"},
+                     timeout=30)
+        r.raise_for_status()
+        items = r.json().get("value", [])
+
         result = []
-        for f in files:
-            if f["Name"].lower().endswith((".xlsx", ".xls")):
+        for item in items:
+            name = item.get("name", "")
+            if name.lower().endswith((".xlsx", ".xls")):
+                # Codificamos site_id + item_id + nombre para recuperarlo al descargar
+                ref = f"{_GRAPH_REF_PREFIX}{site_id}|{item['id']}|{name}"
                 result.append({
-                    "name":       f["Name"],
-                    "server_url": f["ServerRelativeUrl"],
-                    "modified":   f.get("TimeLastModified", ""),
-                    "size_kb":    round(int(f.get("Length", 0)) / 1024, 1),
+                    "name":       name,
+                    "server_url": ref,
+                    "modified":   item.get("lastModifiedDateTime", ""),
+                    "size_kb":    round(item.get("size", 0) / 1024, 1),
                 })
         return result
 
     def download_by_server_url(self, server_url: str) -> tuple[bytes, str]:
-        """Descarga un archivo por su ServerRelativeUrl de SharePoint."""
+        """Descarga un archivo por su referencia (Graph ref o ServerRelativeUrl legacy)."""
+        if server_url.startswith(_GRAPH_REF_PREFIX):
+            return self._download_graph_item(server_url[len(_GRAPH_REF_PREFIX):])
+        # Fallback legacy: SharePoint REST API (por si hay referencias antiguas guardadas)
+        return self._download_sp_rest(server_url)
+
+    def _download_graph_item(self, ref: str) -> tuple[bytes, str]:
+        """Descarga un archivo de SharePoint usando Graph API.
+        ref: '{site_id}|{item_id}|{filename}'"""
+        import requests as _req
+        parts = ref.split("|", 2)
+        site_id  = parts[0]
+        item_id  = parts[1]
+        filename = parts[2] if len(parts) > 2 else "excel.xlsx"
+
+        url = f"{GRAPH}/sites/{site_id}/drive/items/{item_id}/content"
+        r = _req.get(url, headers=self._graph_headers(), timeout=60, allow_redirects=True)
+        r.raise_for_status()
+        return r.content, filename
+
+    def _download_sp_rest(self, server_url: str) -> tuple[bytes, str]:
+        """Descarga legacy por SharePoint REST API (fallback)."""
         import requests as _req
         sp_url    = self._cfg["sharepoint_url"].rstrip("/")
         site_path = self._cfg.get("site_path", "").rstrip("/")
@@ -175,35 +206,38 @@ class GraphExcelReader:
             f"{sp_url}{site_path}/_api/web/"
             f"GetFileByServerRelativePath(decodedurl='{server_url}')/$value"
         )
+        sp_token = self._get_token(f"{sp_url}/.default")
         r = _req.get(url, headers={
-            "Authorization": f"Bearer {self._sp_token()}",
+            "Authorization": f"Bearer {sp_token}",
             "Accept": "application/octet-stream",
-        }, timeout=30)
+        }, timeout=60)
         r.raise_for_status()
         filename = server_url.rsplit("/", 1)[-1]
         return r.content, filename
 
-    # ──────────────────────── Descarga SharePoint (archivo fijo) ────────────────────────
+    # ──────────────────────── Descarga SharePoint (archivo fijo) via Graph ────────────────────────
 
     def _download_sharepoint_file(self) -> tuple[bytes, str]:
-        site_path = self._cfg.get("site_path", "").rstrip("/")
-        file_path = self._cfg.get("file_path", "")
-        server_rel = site_path + ("/" + file_path.lstrip("/"))
-        return self.download_by_server_url(server_rel)
+        """Descarga el archivo fijo de SharePoint usando Graph API."""
+        import requests as _req
+        site_id   = self._get_site_id()
+        file_path = self._cfg.get("file_path", "").strip("/")
+
+        url = f"{GRAPH}/sites/{site_id}/drive/root:/{file_path}:/content"
+        r = _req.get(url, headers=self._graph_headers(), timeout=60, allow_redirects=True)
+        r.raise_for_status()
+        filename = file_path.rsplit("/", 1)[-1] if file_path else "excel.xlsx"
+        return r.content, filename
 
     # ──────────────────────── Descarga Graph / OneDrive ────────────────────────
 
     def _download_graph(self) -> tuple[bytes, str]:
         import requests as _req
-        GRAPH = "https://graph.microsoft.com/v1.0"
-        token = self._get_token("https://graph.microsoft.com/.default")
-        headers = {"Authorization": f"Bearer {token}"}
-
-        cfg       = self._cfg
-        drive_id  = cfg.get("drive_id", "")
-        item_id   = cfg.get("item_id", "")
-        email     = cfg.get("user_email", "")
-        fpath     = cfg.get("file_path", "").lstrip("/")
+        cfg      = self._cfg
+        drive_id = cfg.get("drive_id", "")
+        item_id  = cfg.get("item_id", "")
+        email    = cfg.get("user_email", "")
+        fpath    = cfg.get("file_path", "").lstrip("/")
 
         if item_id and drive_id:
             url = f"{GRAPH}/drives/{drive_id}/items/{item_id}/content"
@@ -216,7 +250,7 @@ class GraphExcelReader:
             user_seg = f"users/{email}" if email else "me"
             url = f"{GRAPH}/{user_seg}/drive/root:/{fpath}:/content"
 
-        r = _req.get(url, headers=headers, timeout=30)
+        r = _req.get(url, headers=self._graph_headers(), timeout=60, allow_redirects=True)
         r.raise_for_status()
         filename = fpath.rsplit("/", 1)[-1] if fpath else "excel.xlsx"
         return r.content, filename
@@ -225,10 +259,9 @@ class GraphExcelReader:
 
     def download_bytes(self, server_url: str = "") -> tuple[bytes, str]:
         """Descarga el Excel y devuelve (bytes, filename).
-        server_url: si se pasa, descarga ese archivo concreto (modo carpeta).
+        server_url: referencia al archivo (de list_folder_files o guardada en _graph_server_url).
         """
-        mode   = self._cfg.get("mode",   "sharepoint")
-        source = self._cfg.get("source", "file")
+        mode = self._cfg.get("mode", "sharepoint")
         if mode == "sharepoint":
             if server_url:
                 return self.download_by_server_url(server_url)
