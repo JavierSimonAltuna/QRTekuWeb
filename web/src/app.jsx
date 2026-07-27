@@ -148,6 +148,13 @@ const QRTekuApp = () => {
     window.api.call("app_info").then(r => { if (r) setServerInfo(r); }).catch(() => {});
   }, []);
 
+  // ── Estado Graph / SharePoint ─────────────────────────────────────────
+  useEffect(() => {
+    window.api.call("graph_get_config").then(r => {
+      if (r && r.ok) setGraphConfigured(r.configured);
+    }).catch(() => {});
+  }, []);
+
   // ── Polling contadores de cola (badge en la pestaña) ───────────────────
   useEffect(() => {
     let alive = true;
@@ -500,6 +507,13 @@ const QRTekuApp = () => {
             </button>
           )}
           <span style={S.topDivider} />
+          {graphConfigured && (
+            <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 8px", background: "rgba(14,165,233,0.15)", border: "1px solid rgba(14,165,233,0.3)", borderRadius: 6 }}
+              title="Leyendo Excel desde SharePoint · Microsoft 365">
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#38bdf8" }} />
+              <span style={{ fontSize: 11, color: "#7dd3fc", fontWeight: 600 }}>SharePoint</span>
+            </div>
+          )}
           <div style={S.connStatus}>
             <span style={{ width: 7, height: 7, borderRadius: "50%", background: connected ? "#22c55e" : "#a8a29e", boxShadow: connected ? "0 0 0 3px rgba(34,197,94,0.18)" : "none" }} />
             <span style={{ fontSize: 11.5, color: "rgba(255,255,255,0.78)", fontWeight: 500 }}>
@@ -753,7 +767,201 @@ const QRTekuApp = () => {
           <TweakToggle label="Mostrar JSON"     value={tw.showJsonPanel}  onChange={(v) => setTweak("showJsonPanel", v)} />
           <TweakToggle label="Auto-recargar Excel (5s)"  value={tw.autoRefresh}    onChange={(v) => setTweak("autoRefresh", v)} />
         </TweakSection>
+        <TweakSection label="Microsoft 365">
+          <div style={{ padding: "6px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: graphConfigured ? "#22c55e" : "#d6d3d1", flexShrink: 0 }} />
+              <span style={{ fontSize: 12, color: graphConfigured ? "#15803d" : "#a8a29e" }}>
+                {graphConfigured ? "SharePoint activo" : "No configurado"}
+              </span>
+            </div>
+            <button
+              onClick={() => setShowGraphModal(true)}
+              style={{ fontSize: 12, fontWeight: 600, padding: "5px 12px", borderRadius: 6, border: "1px solid #d6d3d1", background: "#fff", cursor: "pointer", color: "#1c1917", fontFamily: "inherit" }}
+            >
+              Configurar SharePoint…
+            </button>
+          </div>
+        </TweakSection>
       </TweaksPanel>
+
+      {/* Modal Graph / SharePoint */}
+      {showGraphModal && (
+        <GraphConfigModal
+          onClose={() => setShowGraphModal(false)}
+          onSaved={(configured) => { setGraphConfigured(configured); }}
+          pushToast={pushToast}
+        />
+      )}
+    </div>
+  );
+};
+
+// ───────────────────────────────────────────────────────────────────
+// Graph / SharePoint config modal
+// ───────────────────────────────────────────────────────────────────
+const GraphConfigModal = ({ onClose, onSaved, pushToast }) => {
+  const [cfg, setCfg] = useState({
+    enabled: false, mode: "sharepoint",
+    tenant_id: "", client_id: "", client_secret: "",
+    sharepoint_url: "", site_path: "", file_path: "",
+    user_email: "", drive_id: "", item_id: "",
+  });
+  const [loading, setLoading] = useState(true);
+  const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    window.api.call("graph_get_config").then(r => {
+      if (r && r.ok && r.config && Object.keys(r.config).length) {
+        setCfg(prev => ({ ...prev, ...r.config }));
+      }
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const set = (k, v) => setCfg(prev => ({ ...prev, [k]: v }));
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const r = await window.api.call("graph_save_config", cfg);
+      if (r.ok) {
+        pushToast("Configuración guardada", "success");
+        onSaved(r.configured);
+        onClose();
+      } else {
+        pushToast(r.error || "Error guardando", "error");
+      }
+    } catch (e) {
+      pushToast(String(e), "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    try {
+      const r = await window.api.call("graph_test");
+      if (r.ok) {
+        pushToast(`Conexión OK · ${r.filename} (${(r.bytes / 1024).toFixed(0)} KB)`, "success");
+      } else {
+        pushToast(`Error: ${r.error}`, "error");
+      }
+    } catch (e) {
+      pushToast(String(e), "error");
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const IS = {
+    overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center" },
+    box: { background: "#fff", borderRadius: 12, width: 480, maxWidth: "95vw", maxHeight: "90vh", overflow: "auto", boxShadow: "0 8px 40px rgba(0,0,0,0.18)", fontFamily: "inherit" },
+    head: { padding: "18px 22px 14px", borderBottom: "1px solid #e7e5e4", display: "flex", alignItems: "center", justifyContent: "space-between" },
+    title: { fontSize: 15, fontWeight: 700, color: "#1c1917" },
+    body: { padding: "18px 22px" },
+    row: { marginBottom: 14 },
+    label: { display: "block", fontSize: 11.5, fontWeight: 600, color: "#57534e", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" },
+    input: { width: "100%", padding: "7px 10px", border: "1px solid #d6d3d1", borderRadius: 6, fontSize: 13, fontFamily: "ui-monospace, monospace", boxSizing: "border-box", color: "#1c1917", outline: "none" },
+    hint: { fontSize: 11, color: "#a8a29e", marginTop: 3 },
+    footer: { padding: "12px 22px", borderTop: "1px solid #e7e5e4", display: "flex", gap: 8, justifyContent: "flex-end" },
+    btn: (color) => ({ padding: "7px 16px", borderRadius: 7, border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit", background: color, color: "#fff" }),
+    btnGhost: { padding: "7px 16px", borderRadius: 7, border: "1px solid #d6d3d1", background: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit", color: "#44403c" },
+    toggleRow: { display: "flex", alignItems: "center", gap: 10, marginBottom: 14 },
+    modeRow: { display: "flex", gap: 8, marginBottom: 14 },
+    modeBtn: (active) => ({ flex: 1, padding: "7px 0", borderRadius: 7, border: `1px solid ${active ? "#0ea5e9" : "#d6d3d1"}`, background: active ? "#e0f2fe" : "#fff", color: active ? "#0369a1" : "#57534e", fontWeight: 600, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit" }),
+    section: { fontSize: 11, fontWeight: 700, color: "#a8a29e", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10, paddingTop: 4 },
+  };
+
+  if (loading) return (
+    <div style={IS.overlay}>
+      <div style={{ ...IS.box, padding: 32, textAlign: "center", color: "#a8a29e" }}>Cargando…</div>
+    </div>
+  );
+
+  return (
+    <div style={IS.overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div style={IS.box}>
+        <div style={IS.head}>
+          <span style={IS.title}>Microsoft 365 · SharePoint</span>
+          <button onClick={onClose} style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 18, color: "#78716c", lineHeight: 1 }}>×</button>
+        </div>
+        <div style={IS.body}>
+          {/* Activar */}
+          <div style={IS.toggleRow}>
+            <input type="checkbox" id="g-enabled" checked={!!cfg.enabled} onChange={e => set("enabled", e.target.checked)} style={{ width: 16, height: 16, cursor: "pointer" }} />
+            <label htmlFor="g-enabled" style={{ fontSize: 13.5, fontWeight: 600, color: "#1c1917", cursor: "pointer" }}>
+              Activar lectura desde SharePoint
+            </label>
+          </div>
+
+          {/* Modo */}
+          <div style={IS.section}>Modo</div>
+          <div style={IS.modeRow}>
+            <button style={IS.modeBtn(cfg.mode === "sharepoint")} onClick={() => set("mode", "sharepoint")}>SharePoint (recomendado)</button>
+            <button style={IS.modeBtn(cfg.mode === "graph")} onClick={() => set("mode", "graph")}>OneDrive Graph</button>
+          </div>
+
+          {/* Credenciales Azure */}
+          <div style={IS.section}>Credenciales Azure</div>
+          <div style={IS.row}>
+            <label style={IS.label}>Tenant ID (ID de directorio)</label>
+            <input style={IS.input} value={cfg.tenant_id} onChange={e => set("tenant_id", e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+            <div style={IS.hint}>Azure Portal → Entra ID → Overview → ID de directorio</div>
+          </div>
+          <div style={IS.row}>
+            <label style={IS.label}>Client ID (ID de aplicación)</label>
+            <input style={IS.input} value={cfg.client_id} onChange={e => set("client_id", e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          </div>
+          <div style={IS.row}>
+            <label style={IS.label}>Client Secret</label>
+            <input style={IS.input} type="password" value={cfg.client_secret} onChange={e => set("client_secret", e.target.value)} placeholder="Secreto de cliente" />
+            <div style={IS.hint}>Certificados y secretos → Nuevo secreto → copiar valor</div>
+          </div>
+
+          {/* SharePoint */}
+          {cfg.mode === "sharepoint" && (<>
+            <div style={IS.section}>Ubicación del archivo</div>
+            <div style={IS.row}>
+              <label style={IS.label}>URL de SharePoint</label>
+              <input style={IS.input} value={cfg.sharepoint_url} onChange={e => set("sharepoint_url", e.target.value)} placeholder="https://garvasa.sharepoint.com" />
+            </div>
+            <div style={IS.row}>
+              <label style={IS.label}>Ruta del sitio (site path)</label>
+              <input style={IS.input} value={cfg.site_path} onChange={e => set("site_path", e.target.value)} placeholder="/sites/Logistica  (vacío = sitio raíz)" />
+              <div style={IS.hint}>Parte de la URL entre el host y la biblioteca</div>
+            </div>
+            <div style={IS.row}>
+              <label style={IS.label}>Ruta del archivo</label>
+              <input style={IS.input} value={cfg.file_path} onChange={e => set("file_path", e.target.value)} placeholder="/Documentos compartidos/Cargas.xlsx" />
+              <div style={IS.hint}>Ruta relativa al sitio, incluyendo biblioteca y carpetas</div>
+            </div>
+          </>)}
+
+          {/* OneDrive Graph */}
+          {cfg.mode === "graph" && (<>
+            <div style={IS.section}>Ubicación del archivo (OneDrive)</div>
+            <div style={IS.row}>
+              <label style={IS.label}>Email del usuario</label>
+              <input style={IS.input} value={cfg.user_email} onChange={e => set("user_email", e.target.value)} placeholder="usuario@garvasa.com" />
+            </div>
+            <div style={IS.row}>
+              <label style={IS.label}>Ruta en OneDrive</label>
+              <input style={IS.input} value={cfg.file_path} onChange={e => set("file_path", e.target.value)} placeholder="/Documentos/Cargas.xlsx" />
+            </div>
+          </>)}
+        </div>
+        <div style={IS.footer}>
+          <button onClick={handleTest} disabled={testing} style={{ ...IS.btnGhost, opacity: testing ? 0.6 : 1 }}>
+            {testing ? "Probando…" : "Probar conexión"}
+          </button>
+          <button onClick={onClose} style={IS.btnGhost}>Cancelar</button>
+          <button onClick={handleSave} disabled={saving} style={{ ...IS.btn("#0ea5e9"), opacity: saving ? 0.6 : 1 }}>
+            {saving ? "Guardando…" : "Guardar"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
