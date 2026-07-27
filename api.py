@@ -231,9 +231,14 @@ class Api:
                         g["trip_centers"] = trip_centers
                         g["merch_threshold"] = threshold
 
+            except Exception as _enrich_err:
+                log("WARNING", "load_excel enrich_failed", error=str(_enrich_err))
+            try:
                 added = queue_manager.get_manager().auto_enqueue_from_rows(rows)
-            except Exception:
-                pass
+                if added:
+                    log("INFO", "auto_enqueue", added=added, path=path)
+            except Exception as _eq_err:
+                log("WARNING", "auto_enqueue_failed", error=str(_eq_err))
             self._rows = rows  # guardar para releer precintos al asignar
             # Historial de sesiones Excel (máx 3, deduplicar por ruta)
             _fname = os.path.basename(path)
@@ -311,6 +316,17 @@ class Api:
             return {"ok": False, "error": "no_file"}
         if self._picker_open:
             return {"ok": False, "error": "picker_open"}
+        # Comprobar si el archivo está bloqueado (típico de OneDrive sincronizando)
+        try:
+            with open(self._last_excel_path, "rb"):
+                pass
+        except PermissionError:
+            log("WARNING", "reload_excel_locked", path=self._last_excel_path)
+            if self._rows:
+                return {"ok": True, "rows": self._rows,
+                        "filename": os.path.basename(self._last_excel_path),
+                        "fecha_b2": self._last_fecha_b2, "count": len(self._rows), "auto_enqueued": 0}
+            return {"ok": False, "error": "file_locked"}
         core.clear_chf_caches()   # CIF/agencia siempre frescos; TOULIV1 permanece cacheado
         return self.load_excel(self._last_excel_path)
 
