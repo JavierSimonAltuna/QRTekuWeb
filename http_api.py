@@ -14,6 +14,8 @@ import json
 import traceback
 from http.server import SimpleHTTPRequestHandler
 
+from app_logger import log, log_exc
+
 
 # Lista blanca de métodos invocables por HTTP (los necesarios para la vista cargador
 # y la consulta de cola; los diálogos nativos como pick_excel se excluyen).
@@ -48,6 +50,7 @@ ALLOWED_METHODS = {
     "queue_remove_helper",
     # Diagnóstico
     "get_odbc_diagnostics",
+    "get_debug_log",
     # Gestión de cargadores (supervisor)
     "loader_upsert",
     "loader_remove",
@@ -112,6 +115,7 @@ def make_handler(api, web_dir: str):
                 result = method(*args, **kwargs)
                 self._json(200, result)
             except Exception as e:
+                log_exc(f"HTTP API {method_name}", e)
                 self._json(500, {
                     "ok": False,
                     "error": str(e),

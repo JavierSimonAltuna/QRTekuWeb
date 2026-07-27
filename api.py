@@ -21,6 +21,7 @@ import webview
 
 import qr_teku_core as core
 import queue_manager
+from app_logger import log, log_exc, get_log_lines, LOG_FILE
 
 
 class Api:
@@ -92,6 +93,7 @@ class Api:
         Devuelve { ok: False, error: "..." } si algo falla.
         """
         try:
+            log("INFO", "load_excel", path=path)
             rows, fecha_b2 = core.load_excel(path)
             self._last_excel_path = path
             self._last_fecha_b2 = fecha_b2
@@ -249,6 +251,7 @@ class Api:
                 "auto_enqueued": added,
             }
         except Exception as e:
+            log_exc("load_excel", e)
             return {"ok": False, "error": str(e), "trace": traceback.format_exc()}
 
     def load_excel_base64(self, filename: str, b64_content: str) -> dict:
@@ -753,3 +756,10 @@ class Api:
             return {"ok": True, "log": core.get_odbc_log()}
         except Exception as e:
             return {"ok": False, "error": str(e), "log": []}
+
+    def get_debug_log(self, lines: int = 200) -> dict:
+        """Devuelve las últimas N líneas del fichero de log de ejecución."""
+        try:
+            return {"ok": True, "lines": get_log_lines(int(lines)), "path": str(LOG_FILE)}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "lines": []}

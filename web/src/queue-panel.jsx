@@ -32,6 +32,8 @@ const QueuePanel = ({ pushToast }) => {
   const [search, setSearch] = useState("");
   const [showOdbc, setShowOdbc] = useState(false);
   const [odbcLog, setOdbcLog] = useState([]);
+  const [showDebugLog, setShowDebugLog] = useState(false);
+  const [debugLines, setDebugLines] = useState([]);
   const [loaderForm, setLoaderForm] = useState(null); // null | {id,name,pin,queue_type,isNew}
   const [manualForm, setManualForm] = useState(null); // null | carga manual fuera de plan
   const [auditLog, setAuditLog] = useState([]);
@@ -109,6 +111,12 @@ const QueuePanel = ({ pushToast }) => {
     const r = await window.api.call("get_odbc_diagnostics");
     if (r.ok) setOdbcLog(r.log || []);
     setShowOdbc(true);
+  };
+
+  const handleOpenDebugLog = async () => {
+    const r = await window.api.call("get_debug_log", 300).catch(() => ({ ok: false, lines: [] }));
+    setDebugLines(r.lines || []);
+    setShowDebugLog(true);
   };
 
   const openNewLoader = (defaultType = "ambiente") =>
@@ -248,6 +256,9 @@ const QueuePanel = ({ pushToast }) => {
         </button>
         <button onClick={handleOpenOdbc} style={QS.odbcBtn} title="Diagnóstico ODBC">
           ODBC
+        </button>
+        <button onClick={handleOpenDebugLog} style={{ ...QS.odbcBtn, background: "#1c1917", color: "#fafaf9" }} title="Log de ejecución">
+          Logs
         </button>
         {(isRefriTab
           ? (snap.counts.queued_refr || 0) + (snap.counts.pending_merch_refr || 0)
@@ -711,6 +722,11 @@ const QueuePanel = ({ pushToast }) => {
         <OdbcModal log={odbcLog} onClose={() => setShowOdbc(false)} />
       )}
 
+      {/* ─── Modal log de ejecución ─── */}
+      {showDebugLog && (
+        <DebugLogModal lines={debugLines} onClose={() => setShowDebugLog(false)} onRefresh={handleOpenDebugLog} />
+      )}
+
       {/* ─── Modal gestión de cargadores ─── */}
       {loaderForm && (
         <LoaderFormModal
@@ -800,6 +816,46 @@ const OdbcModal = ({ log, onClose }) => (
     </div>
   </div>
 );
+
+// ───────────────────────────────────────────────────────────────
+// Modal log de ejecución
+// ───────────────────────────────────────────────────────────────
+const DebugLogModal = ({ lines, onClose, onRefresh }) => {
+  const levelColor = (line) => {
+    if (line.includes(" [ERROR] "))   return { color: "#b91c1c", background: "#fff1f2" };
+    if (line.includes(" [WARNING] ")) return { color: "#b45309", background: "#fffbeb" };
+    if (line.includes(" [DEBUG] "))   return { color: "#6b7280", background: "transparent" };
+    return { color: "#1c1917", background: "transparent" };
+  };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 9100, display: "flex", alignItems: "center", justifyContent: "center" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#0c0a09", borderRadius: 12, width: 860, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: "1px solid #292524" }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#fafaf9", fontFamily: "ui-monospace, monospace" }}>pulso_debug.log</span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onRefresh} style={{ background: "#292524", border: "none", borderRadius: 6, color: "#d6d3d1", fontSize: 11, padding: "5px 12px", cursor: "pointer", fontFamily: "inherit" }}>↻ Actualizar</button>
+            <button onClick={onClose} style={{ background: "transparent", border: "none", fontSize: 18, color: "#78716c", cursor: "pointer", lineHeight: 1 }}>✕</button>
+          </div>
+        </div>
+        <div style={{ overflowY: "auto", flex: 1, padding: "8px 0" }}>
+          {lines.length === 0 ? (
+            <div style={{ padding: "40px", textAlign: "center", color: "#57534e", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
+              Log vacío — arranca la app y realiza operaciones para generar entradas.
+            </div>
+          ) : [...lines].reverse().map((line, i) => {
+            const s = levelColor(line);
+            return (
+              <div key={i} style={{ padding: "2px 16px", fontFamily: "ui-monospace, monospace", fontSize: 11, lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-all", background: s.background, color: s.color }}>
+                {line}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // ───────────────────────────────────────────────────────────────
 // Modal gestión de cargadores

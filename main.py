@@ -20,6 +20,7 @@ import webview
 
 from api import Api
 from http_api import make_handler
+from app_logger import log, log_exc
 
 HTTP_PORT = int(os.environ.get("PULSO_PORT", 8765))
 
@@ -79,6 +80,7 @@ def main():
     url = f"http://127.0.0.1:{port}/index.html"
     supervisor_url_lan = f"http://{ip_lan}:{port}/index.html"
     loader_url_lan = f"http://{ip_lan}:{port}/index.html?mode=loader"
+    log("INFO", "PULSO arrancado", ip=ip_lan, puerto=port)
     print(f"\n[PULSO] Supervisor (local):   {url}")
     print(f"[PULSO] Supervisor (tablet):  {supervisor_url_lan}")
     print(f"[PULSO] Cargador (móvil LAN): {loader_url_lan}\n")
