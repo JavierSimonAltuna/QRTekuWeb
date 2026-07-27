@@ -508,16 +508,21 @@ const QRTekuApp = () => {
             </button>
           )}
           <span style={S.topDivider} />
-          {graphConfigured && (
-            <button
-              onClick={() => setShowGraphPicker(true)}
-              style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 10px", background: "rgba(14,165,233,0.15)", border: "1px solid rgba(14,165,233,0.3)", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}
-              title="Importar plan de carga desde SharePoint"
-            >
-              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#38bdf8" }} />
-              <span style={{ fontSize: 11, color: "#7dd3fc", fontWeight: 600 }}>SharePoint</span>
-            </button>
-          )}
+          {/* Botón SharePoint — siempre visible; abre picker si configurado, config si no */}
+          <button
+            onClick={() => graphConfigured ? setShowGraphPicker(true) : setShowGraphModal(true)}
+            style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 10px", background: graphConfigured ? "rgba(14,165,233,0.15)" : "rgba(255,255,255,0.07)", border: `1px solid ${graphConfigured ? "rgba(14,165,233,0.3)" : "rgba(255,255,255,0.15)"}`, borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}
+            title={graphConfigured ? "Importar plan de carga desde SharePoint" : "Configurar SharePoint / Microsoft 365"}
+          >
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: graphConfigured ? "#38bdf8" : "#57534e" }} />
+            <span style={{ fontSize: 11, color: graphConfigured ? "#7dd3fc" : "rgba(255,255,255,0.45)", fontWeight: 600 }}>M365</span>
+          </button>
+          {/* Botón tweaks */}
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent("__activate_edit_mode"))}
+            title="Ajustes (Tweaks)"
+            style={{ ...S.topIconBtn, fontSize: 14 }}
+          >⚙</button>
           <div style={S.connStatus}>
             <span style={{ width: 7, height: 7, borderRadius: "50%", background: connected ? "#22c55e" : "#a8a29e", boxShadow: connected ? "0 0 0 3px rgba(34,197,94,0.18)" : "none" }} />
             <span style={{ fontSize: 11.5, color: "rgba(255,255,255,0.78)", fontWeight: 500 }}>
