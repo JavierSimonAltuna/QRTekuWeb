@@ -1,4 +1,4 @@
-// QR Teku App — v3 · Layout estilo Variant C, sin datos demo,
+// PULSO 3.0 · Supervisor de cargas Garvasa
 // preview del Word a la derecha (idéntico al print real).
 
 const { useState, useMemo, useRef, useEffect, useCallback } = React;

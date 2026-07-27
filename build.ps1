@@ -46,6 +46,7 @@ $pyiArgs = @(
     "--name", "Pulso",
     "--onefile",
     "--windowed",
+    "--version-file", "version_info.txt",
     "--add-data", "web;web",
     "--collect-all", "pywebview",
     "--hidden-import", "pyodbc",

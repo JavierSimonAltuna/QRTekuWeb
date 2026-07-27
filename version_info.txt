@@ -4,8 +4,8 @@
 #
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(3, 9, 0, 0),
-    prodvers=(3, 9, 0, 0),
+    filevers=(3, 0, 0, 0),
+    prodvers=(3, 0, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -19,13 +19,13 @@ VSVersionInfo(
         '040a04b0',
         [
           StringStruct('CompanyName',      'Garvasa Logística'),
-          StringStruct('FileDescription',  'QR Teku — Procesador de cargas'),
-          StringStruct('FileVersion',      '3.9.0.0'),
-          StringStruct('InternalName',     'QRTeku'),
+          StringStruct('FileDescription',  'PULSO — Procesador de cargas'),
+          StringStruct('FileVersion',      '3.0.0.0'),
+          StringStruct('InternalName',     'Pulso'),
           StringStruct('LegalCopyright',   '© 2026 Garvasa Logística · Javier Simón-Altuna San Martín'),
-          StringStruct('OriginalFilename', 'QRTeku.exe'),
-          StringStruct('ProductName',      'QR Teku'),
-          StringStruct('ProductVersion',   '3.9.0.0'),
+          StringStruct('OriginalFilename', 'Pulso.exe'),
+          StringStruct('ProductName',      'PULSO'),
+          StringStruct('ProductVersion',   '3.0.0.0'),
         ]
       )
     ]),

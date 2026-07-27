@@ -31,6 +31,7 @@ if "%ICO_FILE%"=="" (
       --name Pulso ^
       --onefile ^
       --windowed ^
+      --version-file version_info.txt ^
       --add-data "web;web" ^
       --collect-all pywebview ^
       --hidden-import pyodbc ^
@@ -46,6 +47,7 @@ if "%ICO_FILE%"=="" (
       --name Pulso ^
       --onefile ^
       --windowed ^
+      --version-file version_info.txt ^
       --icon="%ICO_FILE%" ^
       --add-data "web;web" ^
       --collect-all pywebview ^

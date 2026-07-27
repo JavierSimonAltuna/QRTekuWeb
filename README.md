@@ -54,7 +54,7 @@ Se abre la ventana con la app. Cualquier cambio en `web/index.html` se refleja a
 build.bat
 ```
 
-Te crea `dist/QRTeku.exe` — ese es el archivo único que copias a las máquinas de los operadores. Pesa ~60 MB porque empaqueta Python + dependencias.
+Te crea `dist/Pulso.exe` — ese es el archivo único que copias a las máquinas de los operadores. Pesa ~60 MB porque empaqueta Python + dependencias.
 
 ---
 
