@@ -550,7 +550,7 @@ class Api:
 
     def app_info(self) -> dict:
         return {
-            "version": "4.2",
+            "version": "5.0",
             "name": "PULSO",
             "company": "Garvasa",
             "platform": os.name,
