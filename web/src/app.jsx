@@ -519,7 +519,7 @@ const QRTekuApp = () => {
           </button>
           {/* Botón tweaks */}
           <button
-            onClick={() => window.dispatchEvent(new CustomEvent("__activate_edit_mode"))}
+            onClick={() => window.postMessage({ type: "__activate_edit_mode" }, "*")}
             title="Ajustes (Tweaks)"
             style={{ ...S.topIconBtn, fontSize: 14 }}
           >⚙</button>
