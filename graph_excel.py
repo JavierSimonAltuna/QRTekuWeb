@@ -148,14 +148,42 @@ class GraphExcelReader:
         r.raise_for_status()
         return r.json()["id"]
 
+    def _find_drive(self, site_id: str, library_name: str) -> str | None:
+        """Busca el drive (biblioteca) cuyo nombre coincide con library_name."""
+        import requests as _req
+        r = _req.get(f"{GRAPH}/sites/{site_id}/drives",
+                     headers=self._graph_headers(), timeout=30)
+        r.raise_for_status()
+        for d in r.json().get("value", []):
+            if d.get("name", "").lower() == library_name.lower():
+                return d["id"]
+        return None
+
     def list_folder_files(self) -> list[dict]:
         """Lista los .xlsx de la carpeta configurada via Graph API.
         Devuelve [{name, server_url, modified, size_kb}]."""
         import requests as _req
-        site_id    = self._get_site_id()
-        folder     = self._cfg.get("folder_path", "").strip("/")
+        site_id = self._get_site_id()
+        folder  = self._cfg.get("folder_path", "").strip("/")
 
-        url = f"{GRAPH}/sites/{site_id}/drive/root:/{folder}:/children"
+        # La folder_path incluye la biblioteca como primer componente:
+        # "Documentos compartidos/Expediciones/PLAN DE CARGA"
+        # → biblioteca: "Documentos compartidos"
+        # → subcarpeta: "Expediciones/PLAN DE CARGA"
+        parts        = folder.split("/", 1)
+        library_name = parts[0]
+        sub_path     = parts[1] if len(parts) > 1 else ""
+
+        drive_id = self._find_drive(site_id, library_name)
+
+        if drive_id and sub_path:
+            url = f"{GRAPH}/drives/{drive_id}/root:/{sub_path}:/children"
+        elif drive_id:
+            url = f"{GRAPH}/drives/{drive_id}/root/children"
+        else:
+            # Fallback: usar el drive por defecto del sitio con la ruta completa
+            url = f"{GRAPH}/sites/{site_id}/drive/root:/{folder}:/children"
+
         r = _req.get(url, headers=self._graph_headers(),
                      params={"$orderby": "lastModifiedDateTime desc", "$top": "50"},
                      timeout=30)
@@ -166,7 +194,6 @@ class GraphExcelReader:
         for item in items:
             name = item.get("name", "")
             if name.lower().endswith((".xlsx", ".xls")):
-                # Codificamos site_id + item_id + nombre para recuperarlo al descargar
                 ref = f"{_GRAPH_REF_PREFIX}{site_id}|{item['id']}|{name}"
                 result.append({
                     "name":       name,
