@@ -48,6 +48,8 @@ ALLOWED_METHODS = {
     "queue_unblock",
     "queue_assign_helper",
     "queue_remove_helper",
+    "queue_set_load_start",
+    "queue_set_load_end",
     # Diagnóstico
     "get_odbc_diagnostics",
     "get_debug_log",

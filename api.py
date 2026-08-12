@@ -681,6 +681,20 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def queue_set_load_start(self, item_id: str, loader_id: str) -> dict:
+        """Registra el inicio de la carga (timestamp pulsado por el cargador)."""
+        try:
+            return queue_manager.get_manager().set_load_start(item_id, str(loader_id or ""))
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def queue_set_load_end(self, item_id: str, loader_id: str) -> dict:
+        """Registra el fin de la carga (timestamp pulsado por el cargador)."""
+        try:
+            return queue_manager.get_manager().set_load_end(item_id, str(loader_id or ""))
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def queue_update_ruta(self, item_id: str, ruta_carga: str) -> dict:
         """Recalcula numsup con una ruta manual y actualiza el item de la cola."""
         try:

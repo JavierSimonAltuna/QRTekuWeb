@@ -590,6 +590,30 @@ class QueueManager:
                     return {"ok": True, "item": it, "numsup_count": numsup_count}
             return {"ok": False, "error": "No encontrado"}
 
+    def set_load_start(self, item_id: str, loader_id: str) -> dict:
+        """Registra el inicio de la carga (pulsado por el cargador)."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id and it["status"] == "assigned" and (
+                    it["assigned_to"] == loader_id or it.get("helper_id") == loader_id
+                ):
+                    it["load_start_at"] = datetime.now().isoformat(timespec="seconds")
+                    self._save()
+                    return {"ok": True, "load_start_at": it["load_start_at"]}
+            return {"ok": False, "error": "No encontrado o no asignada a este cargador"}
+
+    def set_load_end(self, item_id: str, loader_id: str) -> dict:
+        """Registra el fin de la carga (pulsado por el cargador)."""
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id and it["status"] == "assigned" and (
+                    it["assigned_to"] == loader_id or it.get("helper_id") == loader_id
+                ):
+                    it["load_end_at"] = datetime.now().isoformat(timespec="seconds")
+                    self._save()
+                    return {"ok": True, "load_end_at": it["load_end_at"]}
+            return {"ok": False, "error": "No encontrado o no asignada a este cargador"}
+
     # ────────────────────────────────────────────────────────────
     # Lecturas
     # ────────────────────────────────────────────────────────────

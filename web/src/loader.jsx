@@ -146,6 +146,24 @@ const LoaderApp = () => {
     }
   };
 
+  const handleSetLoadStart = async () => {
+    if (!item || !loader) return;
+    try {
+      const r = await window.api.call("queue_set_load_start", item.id, loader.id);
+      if (r.ok) setItem(prev => ({ ...prev, load_start_at: r.load_start_at }));
+      else showToast("Error al registrar inicio: " + (r.error || ""));
+    } catch (e) { showToast("Error: " + (e.message || e)); }
+  };
+
+  const handleSetLoadEnd = async () => {
+    if (!item || !loader) return;
+    try {
+      const r = await window.api.call("queue_set_load_end", item.id, loader.id);
+      if (r.ok) setItem(prev => ({ ...prev, load_end_at: r.load_end_at }));
+      else showToast("Error al registrar fin: " + (r.error || ""));
+    } catch (e) { showToast("Error: " + (e.message || e)); }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem("bleecker.loader");
     setLoader(null);
@@ -175,6 +193,8 @@ const LoaderApp = () => {
           onRefreshPrecintos={handleRefreshPrecintos}
           refreshingPrec={refreshingPrec}
           onLogout={handleLogout}
+          onSetLoadStart={handleSetLoadStart}
+          onSetLoadEnd={handleSetLoadEnd}
         />
       )}
       {screen === "confirming" && item && (
@@ -299,7 +319,7 @@ const WaitingScreen = ({ loader, queuedCount, requesting, onRequest, onLogout })
 // ───────────────────────────────────────────────────────────────
 // Carga asignada (la pantalla principal del cargador)
 // ───────────────────────────────────────────────────────────────
-const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecintos, refreshingPrec, onLogout }) => {
+const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecintos, refreshingPrec, onLogout, onSetLoadStart, onSetLoadEnd }) => {
   const tipoRefr = item.tipo_carga === "REFRIGERADO";
   return (
     <div style={LS.assignRoot}>
@@ -325,9 +345,14 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
         <div style={LS.muelleCard}>
           <div style={LS.muelleHeadRow}>
             <span style={LS.muelleLabel}>MUELLE</span>
-            <span style={LS.muellePill}>P-{item.playa ? Math.ceil((parseInt(item.playa, 10) || 0) / 100) || 1 : 1}</span>
+            <span style={{
+              ...LS.muellePill,
+              background: tipoRefr ? "#0ea5e9" : "#fafaf9",
+              color: tipoRefr ? "#fff" : "#0c0a09",
+            }}>
+              {tipoRefr ? "❄ REFR" : `P-${item.playa ? Math.ceil((parseInt(item.playa, 10) || 0) / 100) || 1 : 1}`}
+            </span>
           </div>
-          {/* Viaje combinado: mostrar todos los centros */}
           {item.is_combined && item.trip_destinos && item.trip_destinos.length > 1 && (
             <div style={{
               fontSize: 10.5, fontWeight: 700, color: "#6d28d9",
@@ -344,18 +369,12 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
                 <div style={LS.muelleMetaLabel}>PLAYA</div>
                 <div style={LS.muelleMetaValue}>{item.playa || "—"}</div>
               </div>
-              <div style={LS.muelleMetaRow}>
-                <div style={LS.muelleMetaLabel}>SALIDA</div>
-                <div style={LS.muelleMetaValue}>{item.hora_salida || "—"}</div>
-              </div>
             </div>
           </div>
           <div style={LS.muelleFoot}>
             <span style={LS.muelleFootKey}>TRACTORA</span> <span style={LS.muelleFootVal}>{item.tractora || "—"}</span>
             <span style={LS.muelleFootSep}>·</span>
             <span style={LS.muelleFootKey}>REMOLQUE</span> <span style={LS.muelleFootVal}>{item.remolque || "—"}</span>
-            <span style={LS.muelleFootSep}>·</span>
-            <span style={LS.muelleFootKey}>CAM</span> <span style={LS.muelleFootVal}>{(item.cam || "").toString().padStart(3, "0")}</span>
             {item.cod_centro && (
               <>
                 <span style={LS.muelleFootSep}>·</span>
@@ -376,30 +395,52 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
           </div>
         )}
 
-        {/* ─── QR card ─── */}
-        <div style={LS.qrCard}>
-          <div style={LS.qrCardHead}>
-            <span style={LS.qrCardKicker}>CARGA TEKU · CÓDIGO BLEECKER</span>
-            <span style={{
-              ...LS.tipoPill,
-              background: tipoRefr ? "#0ea5e9" : "#fb923c",
-              color: "#fff",
-            }}>
-              {tipoRefr ? "❄ REFRIGERADO" : "☼ AMBIENTE"}
-            </span>
-          </div>
-          <div style={LS.qrCardTitle}>EXP. {(item.destino || "").toUpperCase()}</div>
-          <div style={LS.qrWrap}>
-            {item.qr_png_b64 ? (
-              <img src={item.qr_png_b64} alt="QR" style={LS.qrImg} />
-            ) : (
-              <div style={LS.qrPlaceholder}>QR no disponible</div>
+        {/* ─── Ruta y palés ─── */}
+        {(item.ruta_carga != null || item.numsup_count != null) && (
+          <div style={LS.infoCard}>
+            {item.ruta_carga != null && (
+              <div style={LS.infoRow}>
+                <span style={LS.infoLabel}>RUTA</span>
+                <span style={LS.infoValue}>{item.ruta_carga}</span>
+              </div>
+            )}
+            {item.numsup_count != null && (
+              <div style={LS.infoRow}>
+                <span style={LS.infoLabel}>PALÉS</span>
+                <span style={LS.infoValue}>{item.numsup_count}</span>
+              </div>
             )}
           </div>
-          <div style={LS.qrSubtle}>QR TEKU / BLEECKER</div>
-          <div style={LS.qrFoot}>
-            <div style={LS.qrFootL}>{item.agencia || ""} {item.cif ? ` · CIF ${item.cif}` : ""}</div>
-            <div style={LS.qrFootR}>{(item.queued_at || "").replace("T", " ").slice(0, 16)}</div>
+        )}
+
+        {/* ─── Trazabilidad: inicio / fin carga ─── */}
+        <div style={LS.timeCard}>
+          <div style={LS.timeCardLabel}>TRAZABILIDAD DE CARGA</div>
+          <div style={LS.timeRow}>
+            <button
+              onClick={onSetLoadStart}
+              disabled={!!item.load_start_at}
+              style={{
+                ...LS.timeBtn,
+                background: item.load_start_at ? "#dcfce7" : "#dc2626",
+                color: item.load_start_at ? "#166534" : "#fff",
+                cursor: item.load_start_at ? "default" : "pointer",
+              }}
+            >
+              {item.load_start_at ? `✓ ${fmtTime(item.load_start_at)}` : "▶ INICIO CARGA"}
+            </button>
+            <button
+              onClick={onSetLoadEnd}
+              disabled={!item.load_start_at || !!item.load_end_at}
+              style={{
+                ...LS.timeBtn,
+                background: item.load_end_at ? "#dcfce7" : (!item.load_start_at ? "#e7e5e4" : "#1d4ed8"),
+                color: item.load_end_at ? "#166534" : (!item.load_start_at ? "#a8a29e" : "#fff"),
+                cursor: (!item.load_start_at || item.load_end_at) ? "default" : "pointer",
+              }}
+            >
+              {item.load_end_at ? `✓ ${fmtTime(item.load_end_at)}` : "■ FIN CARGA"}
+            </button>
           </div>
         </div>
 
@@ -422,6 +463,7 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
                 total={item.precintos.length}
                 centro={p.centro || item.destino}
                 code={p.precinto}
+                playa={item.is_combined ? (p.playa || null) : null}
               />
             ))}
             {(item.precintos || []).length === 0 && (
@@ -442,10 +484,13 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
   );
 };
 
-const PrecintoRow = ({ index, total, centro, code }) => (
+const PrecintoRow = ({ index, total, centro, code, playa }) => (
   <div style={LS.precRow}>
     <div style={LS.precRowHead}>
-      <div style={LS.precRowCentro}>EXP. {(centro || "").toUpperCase()}</div>
+      <div style={LS.precRowCentro}>
+        EXP. {(centro || "").toUpperCase()}
+        {playa && <span style={{ marginLeft: 6, color: "#6d28d9", fontWeight: 700 }}>· P-{playa}</span>}
+      </div>
       <div style={LS.precRowIdx}>{String(index).padStart(2, "0")}/{String(total).padStart(2, "0")}</div>
     </div>
     <div style={LS.precRowCode}>{code}</div>
@@ -690,19 +735,17 @@ const LS = {
   commentLabel: { fontSize: 9.5, fontWeight: 700, letterSpacing: 1.2, color: "#92400e", textTransform: "uppercase" },
   commentText: { fontSize: 14, fontWeight: 500, color: "#1c1917", lineHeight: 1.5 },
 
-  // ── QR card ───────────────────────────────────
-  qrCard: { background: "#fff", borderRadius: 14, padding: "14px 16px 16px", marginTop: 10, boxShadow: "0 1px 2px rgba(0,0,0,0.04)", border: "1px solid #e7e5e4" },
-  qrCardHead: { display: "flex", alignItems: "center", justifyContent: "space-between" },
-  qrCardKicker: { fontSize: 9.5, fontWeight: 700, letterSpacing: 1.2, color: "#a8a29e", textTransform: "uppercase" },
-  tipoPill: { fontSize: 10, fontWeight: 700, letterSpacing: 0.8, padding: "4px 9px", borderRadius: 4, textTransform: "uppercase" },
-  qrCardTitle: { fontSize: 17, fontWeight: 700, letterSpacing: -0.4, marginTop: 8, color: "#1c1917" },
-  qrWrap: { display: "flex", justifyContent: "center", marginTop: 14, marginBottom: 8 },
-  qrImg: { width: 200, height: 200, imageRendering: "pixelated", border: "1px solid #f4f4f3", borderRadius: 4 },
-  qrPlaceholder: { width: 200, height: 200, background: "#fafaf9", display: "grid", placeItems: "center", color: "#a8a29e", fontSize: 11, border: "1px dashed #d6d3d1", borderRadius: 4 },
-  qrSubtle: { textAlign: "center", fontSize: 10, fontWeight: 700, letterSpacing: 1.6, color: "#a8a29e", textTransform: "uppercase", marginBottom: 12 },
-  qrFoot: { display: "flex", justifyContent: "space-between", paddingTop: 10, borderTop: "1px solid #f4f4f3", fontSize: 10, color: "#78716c", fontFamily: "ui-monospace, monospace" },
-  qrFootL: { letterSpacing: 0.2 },
-  qrFootR: { letterSpacing: 0.2 },
+  // ── Info: ruta + palés ────────────────────────
+  infoCard: { background: "#fff", borderRadius: 12, padding: "12px 16px", marginTop: 10, border: "1px solid #e7e5e4", display: "flex", flexDirection: "column", gap: 8 },
+  infoRow: { display: "flex", justifyContent: "space-between", alignItems: "center" },
+  infoLabel: { fontSize: 10, fontWeight: 700, letterSpacing: 1.2, color: "#a8a29e", textTransform: "uppercase" },
+  infoValue: { fontSize: 17, fontWeight: 700, color: "#1c1917", fontFamily: "ui-monospace, monospace" },
+
+  // ── Trazabilidad: inicio / fin ────────────────
+  timeCard: { background: "#fff", borderRadius: 12, padding: "14px 16px", marginTop: 10, border: "1px solid #e7e5e4" },
+  timeCardLabel: { fontSize: 9.5, fontWeight: 700, letterSpacing: 1.2, color: "#a8a29e", textTransform: "uppercase", marginBottom: 10 },
+  timeRow: { display: "flex", gap: 8 },
+  timeBtn: { flex: 1, padding: "14px 8px", borderRadius: 10, border: "none", fontSize: 11.5, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase", fontFamily: "inherit", transition: "opacity 120ms" },
 
   // ── Precintos ─────────────────────────────────
   precSec: { background: "#fff", borderRadius: 14, padding: "14px 16px 12px", marginTop: 10, border: "1px solid #e7e5e4" },

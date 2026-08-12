@@ -220,8 +220,8 @@ const QueuePanel = ({ pushToast }) => {
   const loaderById = (id) => snap.loaders.find((l) => l.id === id);
   const pendingMerch      = snap.pending_merch      || [];
   const pendingMerchRefri = snap.pending_merch_refr || [];
-  const ambLoaders   = snap.loaders.filter(l => (l.queue_type || "ambiente") === "ambiente");
-  const refriLoaders = snap.loaders.filter(l => (l.queue_type || "ambiente") === "refrigerado");
+  const ambLoaders   = snap.loaders.filter(l => (l.queue_type || "ambiente") === "ambiente").sort((a,b) => a.id.localeCompare(b.id));
+  const refriLoaders = snap.loaders.filter(l => (l.queue_type || "ambiente") === "refrigerado").sort((a,b) => a.id.localeCompare(b.id));
   const isRefriTab = activeTab === "cola_refri" || activeTab === "sinmerch_refri";
 
   const makePendingGroups = (items) => {
@@ -1159,7 +1159,7 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onR
     {showReassignMenu && (
       <div style={QS.reassignMenu}>
         <div style={QS.reassignHint}>Asignar a:</div>
-        {loaders.filter((l) => l.active).map((l) => (
+        {loaders.filter((l) => l.active).sort((a,b) => a.id.localeCompare(b.id)).map((l) => (
           <button key={l.id} onClick={() => onReassign(l.id)} style={QS.reassignOpt}>
             <span style={QS.reassignDot} />
             <span style={{ fontWeight: 600 }}>{l.id}</span>
@@ -1237,7 +1237,7 @@ const AssignedCard = ({ item, loader, helper, loaders, onReassign, onRemove, sho
             </button>
           </div>
         ) : (
-          loaders.filter((l) => l.active && l.id !== item.assigned_to).map((l) => (
+          loaders.filter((l) => l.active && l.id !== item.assigned_to).sort((a,b) => a.id.localeCompare(b.id)).map((l) => (
             <button key={l.id} onClick={() => onAssignHelper(l.id)} style={QS.reassignOpt}>
               <span style={{ ...QS.reassignDot, background: "#22c55e" }} />
               <span style={{ fontWeight: 600 }}>{l.id}</span>
@@ -1252,7 +1252,7 @@ const AssignedCard = ({ item, loader, helper, loaders, onReassign, onRemove, sho
     {showReassignMenu && (
       <div style={QS.reassignMenu}>
         <div style={QS.reassignHint}>Reasignar a:</div>
-        {loaders.filter((l) => l.active && l.id !== item.assigned_to).map((l) => (
+        {loaders.filter((l) => l.active && l.id !== item.assigned_to).sort((a,b) => a.id.localeCompare(b.id)).map((l) => (
           <button key={l.id} onClick={() => onReassign(l.id)} style={QS.reassignOpt}>
             <span style={QS.reassignDot} />
             <span style={{ fontWeight: 600 }}>{l.id}</span>

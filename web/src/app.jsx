@@ -103,7 +103,19 @@ const QRTekuApp = () => {
             const doneSet = new Set(prevRows.filter((r) => r.estado === "done").map((r) => r.n));
             return res.rows.map((r) => doneSet.has(r.n) ? { ...r, estado: "done" } : r);
           });
-          if (res.auto_enqueued > 0) pushToast(`${res.auto_enqueued} carga(s) añadidas a la cola Bleecker`, "success");
+          if (res.auto_enqueued > 0) {
+            pushToast(`${res.auto_enqueued} carga(s) añadidas a la cola Bleecker`, "success");
+            try {
+              const ctx = new (window.AudioContext || window.webkitAudioContext)();
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc.connect(gain); gain.connect(ctx.destination);
+              osc.frequency.value = 880;
+              gain.gain.setValueAtTime(0.35, ctx.currentTime);
+              gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+              osc.start(); osc.stop(ctx.currentTime + 0.6);
+            } catch (_) {}
+          }
         }
       } catch (e) { /* silencio */ }
       if (alive) tid = setTimeout(tick, 5000);
@@ -488,16 +500,6 @@ const QRTekuApp = () => {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {/* CTA Importar muy visible */}
-          <button onClick={handleImport} style={S.importBtnTop}>
-            <IconUpload size={14} />
-            {hasFile ? "Cambiar Excel" : "Importar Excel"}
-          </button>
-          {hasFile && (
-            <button onClick={handleReload} title="Recargar el mismo archivo" style={S.topIconBtn}>
-              <IconRefresh size={14} />
-            </button>
-          )}
           {excelSessions.length > 1 && (
             <button
               onClick={() => setShowExcelPicker(true)}
