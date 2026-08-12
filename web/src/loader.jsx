@@ -399,6 +399,35 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
           </div>
         </div>
 
+        {/* ─── QR card (solo cargas automáticas, no manuales) ─── */}
+        {item.source !== "manual" && (
+          <div style={LS.qrCard}>
+            <div style={LS.qrCardHead}>
+              <span style={LS.qrCardKicker}>CARGA TEKU · CÓDIGO BLEECKER</span>
+              <span style={{
+                ...LS.tipoPill,
+                background: tipoRefr ? "#0ea5e9" : "#fb923c",
+                color: "#fff",
+              }}>
+                {tipoRefr ? "❄ REFRIGERADO" : "☼ AMBIENTE"}
+              </span>
+            </div>
+            <div style={LS.qrCardTitle}>EXP. {(item.destino || "").toUpperCase()}</div>
+            <div style={LS.qrWrap}>
+              {item.qr_png_b64 ? (
+                <img src={item.qr_png_b64} alt="QR" style={LS.qrImg} />
+              ) : (
+                <div style={LS.qrPlaceholder}>QR no disponible</div>
+              )}
+            </div>
+            <div style={LS.qrSubtle}>QR TEKU / BLEECKER</div>
+            <div style={LS.qrFoot}>
+              <div style={LS.qrFootL}>{item.agencia || ""} {item.cif ? ` · CIF ${item.cif}` : ""}</div>
+              <div style={LS.qrFootR}>{(item.queued_at || "").replace("T", " ").slice(0, 16)}</div>
+            </div>
+          </div>
+        )}
+
         {/* ─── Comentario del supervisor ─── */}
         {item.comment && (
           <div style={LS.commentCard}>
@@ -811,6 +840,20 @@ const LS = {
   precRowCode: { fontSize: 17, fontWeight: 700, letterSpacing: -0.2, color: "#1c1917", fontFamily: "ui-monospace, monospace", marginTop: 2 },
   precEmpty: { fontSize: 12, color: "#a8a29e", textAlign: "center", padding: "12px 0" },
   barcode: { display: "flex", alignItems: "stretch", gap: 0, height: 28, marginTop: 6 },
+
+  // ── QR card ───────────────────────────────────
+  qrCard: { background: "#fff", borderRadius: 14, padding: "14px 16px 16px", marginTop: 10, boxShadow: "0 1px 2px rgba(0,0,0,0.04)", border: "1px solid #e7e5e4" },
+  qrCardHead: { display: "flex", alignItems: "center", justifyContent: "space-between" },
+  qrCardKicker: { fontSize: 9.5, fontWeight: 700, letterSpacing: 1.2, color: "#a8a29e", textTransform: "uppercase" },
+  tipoPill: { fontSize: 10, fontWeight: 700, letterSpacing: 0.8, padding: "4px 9px", borderRadius: 4, textTransform: "uppercase" },
+  qrCardTitle: { fontSize: 17, fontWeight: 700, letterSpacing: -0.4, marginTop: 8, color: "#1c1917" },
+  qrWrap: { display: "flex", justifyContent: "center", marginTop: 14, marginBottom: 8 },
+  qrImg: { width: 200, height: 200, imageRendering: "pixelated", border: "1px solid #f4f4f3", borderRadius: 4 },
+  qrPlaceholder: { width: 200, height: 200, background: "#fafaf9", display: "grid", placeItems: "center", color: "#a8a29e", fontSize: 11, border: "1px dashed #d6d3d1", borderRadius: 4 },
+  qrSubtle: { textAlign: "center", fontSize: 10, fontWeight: 700, letterSpacing: 1.6, color: "#a8a29e", textTransform: "uppercase", marginBottom: 12 },
+  qrFoot: { display: "flex", justifyContent: "space-between", paddingTop: 10, borderTop: "1px solid #f4f4f3", fontSize: 10, color: "#78716c", fontFamily: "ui-monospace, monospace" },
+  qrFootL: { letterSpacing: 0.2 },
+  qrFootR: { letterSpacing: 0.2 },
 
   // ── Checklist ──────────────────────────────────
   checklistCard: { background: "#fff", borderRadius: 14, padding: "14px 16px", marginTop: 10, border: "1px solid #e7e5e4" },
