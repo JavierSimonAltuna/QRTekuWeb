@@ -1,25 +1,25 @@
 """
 QR Teku · Gestor de cola Bleecker
 ==================================
-Mantiene en memoria:
-  - Lista de viajes encolados (con QR pre-generado, precintos, muelle, etc.)
-  - Lista de cargadores activos (id + PIN + dónde está cada uno)
-  - Asignaciones activas (qué cargador lleva qué viaje)
+Mantiene en memoria los items ACTIVOS (queued/assigned/pending_merch).
+Los items completados (done) se guardan en SQLite y se consultan desde ahí.
 
-Persiste a JSON en SAVE_DIR/bleecker_queue.json para sobrevivir reinicios.
+Persistencia: SQLite (bleecker_queue.db).
+  - Histórico completo, nunca se pierde al reiniciar.
+  - Migración automática desde bleecker_queue.json si existe.
 
 Algoritmo de asignación (orden de prioridad):
   1. Urgente (manual del supervisor)            ← desc
   2. Hora de salida más próxima                  ← asc
-  3. Distancia al muelle del cargador            ← asc (|muelle_actual − muelle|)
+  3. Distancia al muelle del cargador            ← asc
 """
 
 from __future__ import annotations
 
 import base64
 import json
+import sqlite3
 import threading
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -27,17 +27,45 @@ from typing import Optional
 import qr_teku_core as core
 
 
-# ─── Ubicación de la persistencia (mismo directorio que los Word) ──
-QUEUE_FILE   = core.SAVE_DIR / "bleecker_queue.json"
-LOADERS_FILE = core.SAVE_DIR / "bleecker_loaders.json"
-AUDIT_FILE   = core.SAVE_DIR / "bleecker_audit.json"
+# ─── Ubicación de la persistencia ──────────────────────────────
+DB_FILE      = core.SAVE_DIR / "bleecker_queue.db"
+QUEUE_FILE   = core.SAVE_DIR / "bleecker_queue.json"    # legacy (migración)
+LOADERS_FILE = core.SAVE_DIR / "bleecker_loaders.json"  # legacy (migración)
 
 
-# ─── Cargadores demo por defecto (editables desde Tweaks) ──────────
+# ─── Cargadores demo por defecto ────────────────────────────────
 DEFAULT_LOADERS = [
     {"id": "L01", "pin": "1111", "name": "Cargador 1", "muelle_actual": "01", "active": True, "queue_type": "ambiente"},
     {"id": "L02", "pin": "2222", "name": "Cargador 2", "muelle_actual": "08", "active": True, "queue_type": "ambiente"},
 ]
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS items (
+    id          TEXT PRIMARY KEY,
+    status      TEXT NOT NULL,
+    queue_type  TEXT,
+    queued_at   TEXT,
+    finished_at TEXT,
+    data        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
+
+CREATE TABLE IF NOT EXISTS loaders (
+    id   TEXT PRIMARY KEY,
+    data TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS audit (
+    rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts    TEXT,
+    data  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+"""
 
 
 class QueueManager:
@@ -45,82 +73,159 @@ class QueueManager:
 
     def __init__(self):
         self._lock = threading.RLock()
-        self._items: list[dict] = []       # cola completa (queued + assigned + done)
+        self._items: list[dict] = []    # solo activos: queued / assigned / pending_merch
         self._loaders: list[dict] = []
         self._counter: int = 0
-        self._audit: list[dict] = []       # log de actividad (en memoria, máx 500)
         self._load_from_disk()
 
-    def _add_audit(self, action: str, **kw):
-        entry = {"ts": datetime.now().isoformat(timespec="seconds"), "action": action, **kw}
-        self._audit.append(entry)
-        if len(self._audit) > 500:
-            self._audit = self._audit[-500:]
-        self._save_audit()
+    # ────────────────────────────────────────────────────────────
+    # SQLite helpers
+    # ────────────────────────────────────────────────────────────
+    def _conn(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(DB_FILE), timeout=10, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
 
-    def get_audit_log(self, limit: int = 100) -> list[dict]:
-        with self._lock:
-            return list(reversed(self._audit[-limit:]))
+    def _init_schema(self, conn: sqlite3.Connection):
+        conn.executescript(_SCHEMA)
+        conn.commit()
+
+    def _upsert_item_db(self, conn: sqlite3.Connection, it: dict):
+        conn.execute(
+            "INSERT OR REPLACE INTO items (id, status, queue_type, queued_at, finished_at, data) VALUES (?,?,?,?,?,?)",
+            (it["id"], it["status"], it.get("queue_type", "ambiente"),
+             it.get("queued_at"), it.get("finished_at"),
+             json.dumps(it, ensure_ascii=False))
+        )
+
+    def _persist_item(self, it: dict):
+        with self._conn() as conn:
+            self._upsert_item_db(conn, it)
+            conn.commit()
+
+    def _remove_item_db(self, item_id: str):
+        with self._conn() as conn:
+            conn.execute("DELETE FROM items WHERE id=?", (item_id,))
+            conn.commit()
+
+    def _save_loader(self, loader: dict):
+        with self._conn() as conn:
+            conn.execute("INSERT OR REPLACE INTO loaders VALUES (?,?)",
+                         (loader["id"], json.dumps(loader, ensure_ascii=False)))
+            conn.commit()
+
+    def _persist_counter(self, conn: Optional[sqlite3.Connection] = None):
+        def _do(c):
+            c.execute("INSERT OR REPLACE INTO meta VALUES ('counter', ?)", (str(self._counter),))
+        if conn:
+            _do(conn)
+        else:
+            with self._conn() as c:
+                _do(c)
+                c.commit()
 
     # ────────────────────────────────────────────────────────────
-    # Persistencia
+    # Persistencia / carga inicial
     # ────────────────────────────────────────────────────────────
     def _load_from_disk(self):
         try:
             core.SAVE_DIR.mkdir(parents=True, exist_ok=True)
         except Exception:
             pass
-        if QUEUE_FILE.exists():
-            try:
-                data = json.loads(QUEUE_FILE.read_text(encoding="utf-8"))
-                self._items = data.get("items", [])
-                self._counter = data.get("counter", 0)
-                # Migrar items sin queue_type (creados antes del split ambiente/refrigerado)
-                for it in self._items:
+
+        with self._conn() as conn:
+            self._init_schema(conn)
+
+            row = conn.execute("SELECT value FROM meta WHERE key='counter'").fetchone()
+            self._counter = int(row[0]) if row else 0
+
+            # Items activos en memoria
+            rows = conn.execute(
+                "SELECT data FROM items WHERE status IN ('queued','assigned','pending_merch')"
+            ).fetchall()
+            self._items = []
+            for r in rows:
+                try:
+                    it = json.loads(r[0])
                     if "queue_type" not in it:
                         is_refr = it.get("tipo_carga", "AMBIENTE") == "REFRIGERADO"
-                        is_adelantado = bool(it.get("adelantado_tipo"))
-                        it["queue_type"] = "refrigerado" if (is_refr and not is_adelantado) else "ambiente"
-            except Exception:
-                self._items = []
-                self._counter = 0
-        if LOADERS_FILE.exists():
-            try:
-                self._loaders = json.loads(LOADERS_FILE.read_text(encoding="utf-8"))
-            except Exception:
+                        is_ade  = bool(it.get("adelantado_tipo"))
+                        it["queue_type"] = "refrigerado" if (is_refr and not is_ade) else "ambiente"
+                    self._items.append(it)
+                except Exception:
+                    pass
+
+            # Loaders
+            rows = conn.execute("SELECT data FROM loaders").fetchall()
+            self._loaders = []
+            for r in rows:
+                try:
+                    self._loaders.append(json.loads(r[0]))
+                except Exception:
+                    pass
+            if not self._loaders:
                 self._loaders = list(DEFAULT_LOADERS)
-        else:
-            self._loaders = list(DEFAULT_LOADERS)
-            self._save_loaders()
-        if AUDIT_FILE.exists():
-            try:
-                self._audit = json.loads(AUDIT_FILE.read_text(encoding="utf-8"))
-            except Exception:
-                self._audit = []
+                for l in self._loaders:
+                    conn.execute("INSERT OR REPLACE INTO loaders VALUES (?,?)",
+                                 (l["id"], json.dumps(l, ensure_ascii=False)))
+                conn.commit()
 
-    def _save(self):
+        # Migrar desde JSON legacy si la DB estaba vacía
+        if not self._items and self._counter == 0 and QUEUE_FILE.exists():
+            self._migrate_from_json()
+
+    def _migrate_from_json(self):
+        """Importa bleecker_queue.json → SQLite (una sola vez al arrancar)."""
         try:
-            QUEUE_FILE.write_text(
-                json.dumps({"items": self._items, "counter": self._counter}, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            data = json.loads(QUEUE_FILE.read_text(encoding="utf-8"))
+            items = data.get("items", [])
+            counter = data.get("counter", 0)
+            with self._conn() as conn:
+                for it in items:
+                    if "queue_type" not in it:
+                        is_refr = it.get("tipo_carga", "AMBIENTE") == "REFRIGERADO"
+                        is_ade  = bool(it.get("adelantado_tipo"))
+                        it["queue_type"] = "refrigerado" if (is_refr and not is_ade) else "ambiente"
+                    self._upsert_item_db(conn, it)
+                    if it["status"] not in ("done",):
+                        self._items.append(it)
+                self._counter = counter
+                self._persist_counter(conn)
+                conn.commit()
+            # Loaders legacy
+            if LOADERS_FILE.exists() and not self._loaders:
+                loaders = json.loads(LOADERS_FILE.read_text(encoding="utf-8"))
+                self._loaders = loaders
+                with self._conn() as conn:
+                    for l in self._loaders:
+                        conn.execute("INSERT OR REPLACE INTO loaders VALUES (?,?)",
+                                     (l["id"], json.dumps(l, ensure_ascii=False)))
+                    conn.commit()
         except Exception:
             pass
 
-    def _save_audit(self):
+    # ────────────────────────────────────────────────────────────
+    # Auditoría
+    # ────────────────────────────────────────────────────────────
+    def _add_audit(self, action: str, **kw):
+        entry = {"ts": datetime.now().isoformat(timespec="seconds"), "action": action, **kw}
         try:
-            AUDIT_FILE.write_text(
-                json.dumps(self._audit[-500:], ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            with self._conn() as conn:
+                conn.execute("INSERT INTO audit (ts, data) VALUES (?,?)",
+                             (entry["ts"], json.dumps(entry, ensure_ascii=False)))
+                conn.commit()
         except Exception:
             pass
 
-    def _save_loaders(self):
+    def get_audit_log(self, limit: int = 100) -> list[dict]:
         try:
-            LOADERS_FILE.write_text(json.dumps(self._loaders, ensure_ascii=False, indent=2), encoding="utf-8")
+            with self._conn() as conn:
+                rows = conn.execute(
+                    "SELECT data FROM audit ORDER BY rowid DESC LIMIT ?", (limit,)
+                ).fetchall()
+            return [json.loads(r[0]) for r in rows]
         except Exception:
-            pass
+            return []
 
     # ────────────────────────────────────────────────────────────
     # Helpers internos
@@ -134,7 +239,6 @@ class QueueManager:
 
     @staticmethod
     def _parse_time(s: str) -> tuple:
-        """'08:30' → (8, 30). Fallback (99,99) para que vaya al final."""
         try:
             parts = str(s).strip().split(":")
             return (int(parts[0]), int(parts[1]))
@@ -143,47 +247,35 @@ class QueueManager:
 
     def _new_ticket(self) -> str:
         self._counter += 1
+        self._persist_counter()
         return f"A-{self._counter:04d}"
 
     # ────────────────────────────────────────────────────────────
     # Auto-enqueue desde load_excel
     # ────────────────────────────────────────────────────────────
     def auto_enqueue_from_rows(self, rows: list[dict]) -> int:
-        """
-        Para cada fila aculada activa (no ya_cargado) que no esté en cola,
-        genera el QR y la añade. Si ya está en pending_merch, actualiza counts
-        y promueve a queued si mercancia_ok. Devuelve nº de nuevas/promovidas.
-        Los viajes combinados (is_combined=True, mismo viaje_n) se fusionan en
-        UN SOLO item de cola; precintos_data ya contiene todos los centros.
-        """
         with self._lock:
             added = 0
-            changed = False
             active_statuses = ("queued", "assigned", "pending_merch")
-            # Presencia de viajes simples: clave (viaje_n, destino)
-            present_single: dict = {
+            present_single = {
                 (it["viaje_n"], it["destino"]): it
                 for it in self._items
                 if it["status"] in active_statuses and not it.get("is_combined")
             }
-            # Presencia de viajes combinados: clave viaje_n (uno por viaje)
-            present_combined: dict = {
+            present_combined = {
                 it["viaje_n"]: it
                 for it in self._items
                 if it["status"] in active_statuses and it.get("is_combined")
             }
-            # Ya completados: nunca volver a encolar aunque el Excel no esté en verde
-            done_single: set = {
-                (it["viaje_n"], it["destino"])
-                for it in self._items
-                if it["status"] == "done" and not it.get("is_combined")
-            }
-            done_combined: set = {
-                it["viaje_n"]
-                for it in self._items
-                if it["status"] == "done" and it.get("is_combined")
-            }
-            # Combinados añadidos en esta llamada (para deduplicar dentro del mismo lote)
+            # Done en DB (para no volver a encolar)
+            try:
+                with self._conn() as conn:
+                    db_rows = conn.execute("SELECT data FROM items WHERE status='done'").fetchall()
+                done_items = [json.loads(r[0]) for r in db_rows]
+            except Exception:
+                done_items = []
+            done_single    = {(it["viaje_n"], it["destino"]) for it in done_items if not it.get("is_combined")}
+            done_combined  = {it["viaje_n"] for it in done_items if it.get("is_combined")}
             combined_seen: set = set()
 
             for r in rows:
@@ -195,28 +287,26 @@ class QueueManager:
                 is_combined = bool(r.get("is_combined", False))
 
                 if is_combined:
-                    # Viaje combinado: un solo item por viaje_n
                     if n in done_combined:
                         continue
                     if n in present_combined:
                         existing = present_combined[n]
                         if existing["status"] == "pending_merch":
                             new_ok = bool(r.get("mercancia_ok", False))
-                            existing["combined_count"] = r.get("combined_count")
-                            existing["numsup_count"] = r.get("numsup_count")
-                            existing["mercancia_ok"] = new_ok
-                            existing["trip_centers"] = r.get("trip_centers", existing.get("trip_centers", []))
+                            existing["combined_count"]  = r.get("combined_count")
+                            existing["numsup_count"]    = r.get("numsup_count")
+                            existing["mercancia_ok"]    = new_ok
+                            existing["trip_centers"]    = r.get("trip_centers", existing.get("trip_centers", []))
                             existing["merch_threshold"] = r.get("merch_threshold", existing.get("merch_threshold"))
                             if new_ok:
                                 existing["status"] = "queued"
-                                changed = True
                                 added += 1
+                                self._persist_item(existing)
                         continue
                     if n in combined_seen:
-                        continue  # ya añadido en este lote
+                        continue
                     combined_seen.add(n)
                 else:
-                    # Viaje simple: clave (viaje_n, destino)
                     key = (n, r.get("destino", ""))
                     if key in done_single:
                         continue
@@ -224,27 +314,26 @@ class QueueManager:
                         existing = present_single[key]
                         if existing["status"] == "pending_merch":
                             new_ok = bool(r.get("mercancia_ok", False))
-                            existing["combined_count"] = r.get("combined_count")
-                            existing["numsup_count"] = r.get("numsup_count")
+                            existing["combined_count"]  = r.get("combined_count")
+                            existing["numsup_count"]    = r.get("numsup_count")
                             existing["merch_threshold"] = r.get("merch_threshold", existing.get("merch_threshold"))
-                            existing["mercancia_ok"] = new_ok
+                            existing["mercancia_ok"]    = new_ok
                             if new_ok:
                                 existing["status"] = "queued"
-                                changed = True
                                 added += 1
+                                self._persist_item(existing)
                         continue
 
-                self._items.append(self._build_item(r, urgente=False, source="auto"))
+                item = self._build_item(r, urgente=False, source="auto")
+                self._items.append(item)
+                self._persist_item(item)
                 added += 1
-            if added or changed:
-                self._save()
+
             return added
 
     def manual_enqueue(self, row: dict, urgente: bool = False) -> dict:
-        """Encolar manualmente desde la app supervisor (botón explícito)."""
         with self._lock:
             is_combined = bool(row.get("is_combined", False))
-            # Si ya está en cola (queued/assigned/pending_merch), promover y devolver
             for it in self._items:
                 already = (
                     it["viaje_n"] == row.get("n")
@@ -256,43 +345,33 @@ class QueueManager:
                     if urgente and not it["urgente"]:
                         it["urgente"] = True
                         changed = True
-                    # Acción explícita del supervisor → promover pending_merch a queued
                     if it["status"] == "pending_merch":
                         it["status"] = "queued"
                         it["mercancia_ok"] = True
                         changed = True
                     if changed:
-                        self._save()
+                        self._persist_item(it)
                     return it
-            # Acción explícita del supervisor → siempre encolar directamente (sin umbral)
             row = dict(row)
             row["mercancia_ok"] = True
             item = self._build_item(row, urgente=urgente, source="manual")
             self._items.append(item)
-            self._save()
+            self._persist_item(item)
             self._add_audit("encolada", item_id=item["id"], destino=item.get("destino"),
                             viaje_n=item.get("viaje_n"), urgente=urgente)
             return item
 
     def _build_item(self, row: dict, urgente: bool, source: str) -> dict:
-        """Construye un item de cola con QR PNG ya renderizado."""
         ticket_id = self._new_ticket()
-        # Viaje no presente en el plan de carga (añadido manualmente por el supervisor):
-        # usamos el ticket como identificador de viaje.
         viaje_n = (row.get("n") or "").strip() or ticket_id
-
-        # Payload del QR — solo T,R,N,D,C,E,P
         matriculas = (row.get("matriculas") or "").split("/")
         tractora = matriculas[0].strip().upper() if matriculas else ""
         remolque = (matriculas[1].strip().upper() if len(matriculas) > 1 else tractora)
         payload = {
-            "T": tractora,
-            "R": remolque,
+            "T": tractora, "R": remolque,
             "N": viaje_n.zfill(3),
             "D": row.get("fecha") or datetime.now().strftime("%Y%m%d"),
-            "C": row.get("cif") or "",
-            "E": row.get("agencia") or "",
-            "P": [],
+            "C": row.get("cif") or "", "E": row.get("agencia") or "", "P": [],
         }
         compact = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
         try:
@@ -301,75 +380,48 @@ class QueueManager:
         except Exception:
             qr_b64 = ""
 
-        # Tipo de carga: refrigerado si "REFR" en tipo/expedición, o si la cola
-        # destino es "refrigerado" (carga fuera de plan añadida manualmente)
         tipo_raw = (row.get("tipo") or "").upper()
-        exp_raw = (row.get("expedicion") or "").upper()
-        is_refr = (
+        exp_raw  = (row.get("expedicion") or "").upper()
+        is_refr  = (
             "REFR" in tipo_raw or "FRIO" in tipo_raw or "REFR" in exp_raw
             or row.get("queue_type") == "refrigerado"
         )
-
-        # Hora de salida: usamos expedicion si parece una hora, si no, derivamos de hora_acule+30min
-        hora_salida = self._derive_salida(row)
-
-        mercancia_ok = bool(row.get("mercancia_ok", True))
+        hora_salida   = self._derive_salida(row)
+        mercancia_ok  = bool(row.get("mercancia_ok", True))
         initial_status = "queued" if mercancia_ok else "pending_merch"
 
         return {
-            "id": ticket_id,
-            "viaje_n": viaje_n,
-            "destino": row.get("destino", ""),
-            "tractora": tractora,
-            "remolque": remolque,
-            "matriculas": row.get("matriculas", ""),
-            "cam": row.get("orden", "") or "",
-            "playa": row.get("playa", ""),
-            "muelle": row.get("muelle", ""),
-            "hora_salida": hora_salida,
-            "hora_acule": row.get("hora_acule", ""),
-            "expedicion": row.get("expedicion", ""),
-            "cod_centro": row.get("cod_centro", ""),
+            "id": ticket_id, "viaje_n": viaje_n,
+            "destino": row.get("destino", ""), "tractora": tractora, "remolque": remolque,
+            "matriculas": row.get("matriculas", ""), "cam": row.get("orden", "") or "",
+            "playa": row.get("playa", ""), "muelle": row.get("muelle", ""),
+            "hora_salida": hora_salida, "hora_acule": row.get("hora_acule", ""),
+            "expedicion": row.get("expedicion", ""), "cod_centro": row.get("cod_centro", ""),
             "tipo_carga": "REFRIGERADO" if is_refr else "AMBIENTE",
-            "agencia": row.get("agencia", ""),
-            "cif": row.get("cif", ""),
+            "agencia": row.get("agencia", ""), "cif": row.get("cif", ""),
             "precintos": row.get("precintos_data", []),
-            "qr_png_b64": qr_b64,
-            "qr_payload_compact": compact,
+            "qr_png_b64": qr_b64, "qr_payload_compact": compact,
             "urgente": bool(urgente) or row.get("adelantado_tipo") == "manana" or bool(row.get("gallego_urgente", False)),
-            "status": initial_status,
-            "assigned_to": None,
-            "assigned_at": None,
-            "queued_at": datetime.now().isoformat(timespec="seconds"),
-            "finished_at": None,
-            "source": source,
-            "completed_muelle": None,
-            "completed_at": None,
+            "status": initial_status, "assigned_to": None, "assigned_at": None,
+            "queued_at": datetime.now().isoformat(timespec="seconds"), "finished_at": None,
+            "source": source, "completed_muelle": None, "completed_at": None,
             "mercancia_ok": mercancia_ok,
-            "combined_count": row.get("combined_count"),
-            "numsup_count": row.get("numsup_count"),
+            "combined_count": row.get("combined_count"), "numsup_count": row.get("numsup_count"),
             "is_combined": bool(row.get("is_combined", False)),
-            "trip_destinos": row.get("trip_destinos", []),
-            "trip_centers": row.get("trip_centers", []),
+            "trip_destinos": row.get("trip_destinos", []), "trip_centers": row.get("trip_centers", []),
             "merch_threshold": row.get("merch_threshold"),
             "queue_type": row.get("queue_type", "ambiente"),
             "gallego_urgente": bool(row.get("gallego_urgente", False)),
-            "touliv1": row.get("touliv1"),
-            "ruta_carga": row.get("ruta_carga"),
-            "comment": "",
-            "blocked": False,
-            "helper_id": None,
+            "touliv1": row.get("touliv1"), "ruta_carga": row.get("ruta_carga"),
+            "comment": "", "blocked": False, "helper_id": None,
+            "load_start_at": None, "load_end_at": None, "checklist": None,
         }
 
     @staticmethod
     def _derive_salida(row: dict) -> str:
-        """Hora de salida prevista. Preferimos la columna AB (SALIDA PREV) ya
-        normalizada por core como `hora_salida`. Si no hay, derivamos de
-        hora_acule + 30 min como aproximación."""
         v = str(row.get("hora_salida", "")).strip()
         if ":" in v:
             return v[:5]
-        # fallback: hora_acule + 30 min
         ha = str(row.get("hora_acule", "")).strip()
         if ":" in ha:
             try:
@@ -382,8 +434,6 @@ class QueueManager:
 
     @staticmethod
     def _minutes_to_departure(hora_salida: str) -> float:
-        """Minutos hasta la hora de salida desde ahora. Inf si no hay hora válida.
-        Si la hora ya pasó (más de 5 min), se asume que es del día siguiente."""
         try:
             parts = str(hora_salida).strip().split(":")
             h, m = int(parts[0]), int(parts[1])
@@ -398,48 +448,45 @@ class QueueManager:
             return float("inf")
 
     def _promote_urgent_pending(self):
-        """Promueve a urgente los items pending_merch con salida en ≤45 min."""
         for it in self._items:
             if it["status"] == "pending_merch":
                 mins = self._minutes_to_departure(it.get("hora_salida", ""))
                 if mins <= 45:
                     it["status"] = "queued"
                     it["urgente"] = True
+                    self._persist_item(it)
 
     # ────────────────────────────────────────────────────────────
-    # Algoritmo: siguiente carga para un cargador
+    # Algoritmo: siguiente carga
     # ────────────────────────────────────────────────────────────
     def pick_next_for(self, loader_id: str) -> Optional[dict]:
-        """Asigna la siguiente carga al cargador según el algoritmo. None si cola vacía."""
         with self._lock:
             loader = self._get_loader(loader_id)
             if not loader:
                 return None
             muelle_loader = loader.get("muelle_actual", "00")
-            loader_qt = loader.get("queue_type", "ambiente")
-            pool = [it for it in self._items if it["status"] == "queued" and not it.get("blocked")
+            loader_qt     = loader.get("queue_type", "ambiente")
+            pool = [it for it in self._items
+                    if it["status"] == "queued" and not it.get("blocked")
                     and it.get("queue_type", "ambiente") == loader_qt]
             if not pool:
                 return None
-            # Ordenamos: (no-urgente=1, urgente=0)  → urgentes primero
-            #            luego hora_salida asc, luego distancia muelle asc
             pool.sort(key=lambda it: (
                 0 if it["urgente"] else 1,
                 self._parse_time(it["hora_salida"]),
                 self._muelle_distance(muelle_loader, it["muelle"]),
             ))
             chosen = pool[0]
-            chosen["status"] = "assigned"
+            chosen["status"]      = "assigned"
             chosen["assigned_to"] = loader_id
             chosen["assigned_at"] = datetime.now().isoformat(timespec="seconds")
-            self._save()
+            self._persist_item(chosen)
             self._add_audit("asignada", item_id=chosen["id"], destino=chosen.get("destino"),
                             loader_id=loader_id, muelle=chosen.get("muelle"),
                             viaje_n=chosen.get("viaje_n"))
             return chosen
 
     def get_current_for(self, loader_id: str) -> Optional[dict]:
-        """Devuelve la asignación activa del cargador (primario o ayudante), sin asignar una nueva."""
         with self._lock:
             for it in self._items:
                 if it["status"] == "assigned" and (
@@ -448,35 +495,40 @@ class QueueManager:
                     return it
             return None
 
-    def finish(self, item_id: str, loader_id: str) -> dict:
-        """Marca como completada. Puede marcarla tanto el cargador primario como el ayudante."""
+    def finish(self, item_id: str, loader_id: str, checklist: Optional[dict] = None) -> dict:
+        """Marca como completada. Guarda checklist de inspección si se proporciona."""
         with self._lock:
-            for it in self._items:
+            for i, it in enumerate(self._items):
                 if it["id"] == item_id and (
                     it["assigned_to"] == loader_id or it.get("helper_id") == loader_id
                 ):
-                    it["status"] = "done"
-                    it["finished_at"] = datetime.now().isoformat(timespec="seconds")
+                    it["status"]           = "done"
+                    it["finished_at"]      = datetime.now().isoformat(timespec="seconds")
                     it["completed_muelle"] = it["muelle"]
-                    it["completed_at"] = datetime.now().strftime("%H:%M:%S")
-                    # Actualizar posición del cargador
+                    it["completed_at"]     = datetime.now().strftime("%H:%M:%S")
+                    if checklist:
+                        it["checklist"] = checklist
                     loader = self._get_loader(loader_id)
                     if loader:
                         loader["muelle_actual"] = it["muelle"]
-                        self._save_loaders()
-                    self._save()
+                        self._save_loader(loader)
+                    self._persist_item(it)
+                    del self._items[i]   # ya vive en DB, no ocupa memoria
                     self._add_audit("finalizada", item_id=item_id, destino=it.get("destino"),
                                     loader_id=loader_id, muelle=it.get("muelle"),
                                     viaje_n=it.get("viaje_n"))
                     return {"ok": True, "completed": it}
             return {"ok": False, "error": "Asignación no encontrada"}
 
+    # ────────────────────────────────────────────────────────────
+    # Mutaciones sobre items activos
+    # ────────────────────────────────────────────────────────────
     def remove(self, item_id: str) -> dict:
         with self._lock:
             for i, it in enumerate(self._items):
                 if it["id"] == item_id and it["status"] in ("queued", "assigned"):
                     del self._items[i]
-                    self._save()
+                    self._remove_item_db(item_id)
                     return {"ok": True}
             return {"ok": False, "error": "No encontrado"}
 
@@ -484,11 +536,11 @@ class QueueManager:
         with self._lock:
             for it in self._items:
                 if it["id"] == item_id and it["status"] in ("queued", "assigned"):
-                    prev_loader = it.get("assigned_to")
+                    prev_loader       = it.get("assigned_to")
                     it["assigned_to"] = new_loader_id
-                    it["status"] = "assigned"
+                    it["status"]      = "assigned"
                     it["assigned_at"] = datetime.now().isoformat(timespec="seconds")
-                    self._save()
+                    self._persist_item(it)
                     self._add_audit("reasignada", item_id=item_id, destino=it.get("destino"),
                                     loader_id=new_loader_id, prev_loader_id=prev_loader,
                                     viaje_n=it.get("viaje_n"))
@@ -496,12 +548,11 @@ class QueueManager:
             return {"ok": False, "error": "No encontrado"}
 
     def set_comment(self, item_id: str, comment: str) -> dict:
-        """Guarda el comentario del supervisor en un item (visible al cargador)."""
         with self._lock:
             for it in self._items:
                 if it["id"] == item_id:
                     it["comment"] = str(comment or "").strip()
-                    self._save()
+                    self._persist_item(it)
                     return {"ok": True}
             return {"ok": False, "error": "No encontrado"}
 
@@ -510,109 +561,108 @@ class QueueManager:
             for it in self._items:
                 if it["id"] == item_id:
                     it["urgente"] = bool(urgente)
-                    self._save()
+                    self._persist_item(it)
                     return {"ok": True}
             return {"ok": False, "error": "No encontrado"}
 
     def block_item(self, item_id: str) -> dict:
-        """Bloquea un item de la cola para que no sea asignado automáticamente."""
         with self._lock:
             for it in self._items:
                 if it["id"] == item_id and it["status"] == "queued":
                     it["blocked"] = True
-                    self._save()
+                    self._persist_item(it)
                     return {"ok": True}
             return {"ok": False, "error": "No encontrado o no está en cola"}
 
     def unblock_item(self, item_id: str) -> dict:
-        """Desbloquea un item para que vuelva a ser elegible para asignación."""
         with self._lock:
             for it in self._items:
                 if it["id"] == item_id and it["status"] == "queued":
                     it["blocked"] = False
-                    self._save()
+                    self._persist_item(it)
                     return {"ok": True}
             return {"ok": False, "error": "No encontrado o no está en cola"}
 
     def assign_helper(self, item_id: str, helper_loader_id: str) -> dict:
-        """Asigna un segundo cargador como ayudante de una carga ya asignada."""
         with self._lock:
             for it in self._items:
                 if it["id"] == item_id and it["status"] == "assigned":
                     it["helper_id"] = helper_loader_id
-                    self._save()
+                    self._persist_item(it)
                     return {"ok": True, "item": it}
             return {"ok": False, "error": "No encontrado o no está asignada"}
 
     def remove_helper(self, item_id: str) -> dict:
-        """Elimina el ayudante de una carga."""
         with self._lock:
             for it in self._items:
                 if it["id"] == item_id:
                     it["helper_id"] = None
-                    self._save()
+                    self._persist_item(it)
                     return {"ok": True}
             return {"ok": False, "error": "No encontrado"}
 
     def force_queued(self, item_id: str) -> dict:
-        """Fuerza un item pending_merch a la cola como urgente."""
         with self._lock:
             for it in self._items:
                 if it["id"] == item_id and it["status"] == "pending_merch":
-                    it["status"] = "queued"
+                    it["status"]  = "queued"
                     it["urgente"] = True
-                    self._save()
+                    self._persist_item(it)
                     return {"ok": True}
             return {"ok": False, "error": "No encontrado o no en pending_merch"}
 
     def send_to_pending_merch(self, item_id: str) -> dict:
-        """Mueve un item de la cola (queued) a Sin mercancía (pending_merch)."""
         with self._lock:
             for it in self._items:
                 if it["id"] == item_id and it["status"] in ("queued",):
-                    it["status"] = "pending_merch"
+                    it["status"]       = "pending_merch"
                     it["mercancia_ok"] = False
-                    self._save()
+                    self._persist_item(it)
                     return {"ok": True}
             return {"ok": False, "error": "No encontrado o no está en cola"}
 
     def update_ruta_carga(self, item_id: str, ruta_carga: int, numsup_count: int, mercancia_ok: bool) -> dict:
-        """Actualiza ruta_carga y numsup_count de un item (corrección manual de ruta)."""
         with self._lock:
             for it in self._items:
                 if it["id"] == item_id:
-                    it["ruta_carga"] = ruta_carga
-                    it["numsup_count"] = numsup_count
-                    it["mercancia_ok"] = mercancia_ok
+                    it["ruta_carga"]    = ruta_carga
+                    it["numsup_count"]  = numsup_count
+                    it["mercancia_ok"]  = mercancia_ok
                     if it["status"] == "pending_merch" and mercancia_ok:
                         it["status"] = "queued"
-                    self._save()
+                    self._persist_item(it)
                     return {"ok": True, "item": it, "numsup_count": numsup_count}
             return {"ok": False, "error": "No encontrado"}
 
     def set_load_start(self, item_id: str, loader_id: str) -> dict:
-        """Registra el inicio de la carga (pulsado por el cargador)."""
         with self._lock:
             for it in self._items:
                 if it["id"] == item_id and it["status"] == "assigned" and (
                     it["assigned_to"] == loader_id or it.get("helper_id") == loader_id
                 ):
                     it["load_start_at"] = datetime.now().isoformat(timespec="seconds")
-                    self._save()
+                    self._persist_item(it)
                     return {"ok": True, "load_start_at": it["load_start_at"]}
             return {"ok": False, "error": "No encontrado o no asignada a este cargador"}
 
     def set_load_end(self, item_id: str, loader_id: str) -> dict:
-        """Registra el fin de la carga (pulsado por el cargador)."""
         with self._lock:
             for it in self._items:
                 if it["id"] == item_id and it["status"] == "assigned" and (
                     it["assigned_to"] == loader_id or it.get("helper_id") == loader_id
                 ):
                     it["load_end_at"] = datetime.now().isoformat(timespec="seconds")
-                    self._save()
+                    self._persist_item(it)
                     return {"ok": True, "load_end_at": it["load_end_at"]}
             return {"ok": False, "error": "No encontrado o no asignada a este cargador"}
+
+    def update_item_fields(self, item_id: str, fields: dict) -> None:
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id:
+                    it.update(fields)
+                    self._persist_item(it)
+                    return
 
     # ────────────────────────────────────────────────────────────
     # Lecturas
@@ -622,37 +672,43 @@ class QueueManager:
             self._promote_urgent_pending()
             sort_q = lambda it: (0 if it["urgente"] else 1, self._parse_time(it["hora_salida"]))
             sort_p = lambda it: self._parse_time(it.get("hora_salida", ""))
-            done = [it for it in self._items if it["status"] == "done"]
 
             def _qt(it):
                 return it.get("queue_type", "ambiente")
 
-            queued_amb = sorted([it for it in self._items if it["status"] == "queued" and _qt(it) == "ambiente"], key=sort_q)
-            queued_ref = sorted([it for it in self._items if it["status"] == "queued" and _qt(it) == "refrigerado"], key=sort_q)
-            assigned_amb = [it for it in self._items if it["status"] == "assigned" and _qt(it) == "ambiente"]
-            assigned_ref = [it for it in self._items if it["status"] == "assigned" and _qt(it) == "refrigerado"]
-            pending_amb = sorted([it for it in self._items if it["status"] == "pending_merch" and _qt(it) == "ambiente"], key=sort_p)
-            pending_ref = sorted([it for it in self._items if it["status"] == "pending_merch" and _qt(it) == "refrigerado"], key=sort_p)
+            queued_amb   = sorted([it for it in self._items if it["status"] == "queued"       and _qt(it) == "ambiente"],     key=sort_q)
+            queued_ref   = sorted([it for it in self._items if it["status"] == "queued"       and _qt(it) == "refrigerado"],  key=sort_q)
+            assigned_amb =        [it for it in self._items if it["status"] == "assigned"     and _qt(it) == "ambiente"]
+            assigned_ref =        [it for it in self._items if it["status"] == "assigned"     and _qt(it) == "refrigerado"]
+            pending_amb  = sorted([it for it in self._items if it["status"] == "pending_merch" and _qt(it) == "ambiente"],   key=sort_p)
+            pending_ref  = sorted([it for it in self._items if it["status"] == "pending_merch" and _qt(it) == "refrigerado"], key=sort_p)
+
+            # Done: últimos 50 de la DB (histórico completo)
+            try:
+                with self._conn() as conn:
+                    db_rows = conn.execute(
+                        "SELECT data FROM items WHERE status='done' ORDER BY finished_at DESC LIMIT 50"
+                    ).fetchall()
+                done = [json.loads(r[0]) for r in db_rows]
+            except Exception:
+                done = []
 
             blocked_count = sum(1 for it in self._items if it["status"] == "queued" and it.get("blocked"))
             return {
-                "queued": queued_amb,
-                "queued_refr": queued_ref,
-                "assigned": assigned_amb,
-                "assigned_refr": assigned_ref,
-                "done": done[-20:],
-                "pending_merch": pending_amb,
-                "pending_merch_refr": pending_ref,
+                "queued": queued_amb, "queued_refr": queued_ref,
+                "assigned": assigned_amb, "assigned_refr": assigned_ref,
+                "done": done,
+                "pending_merch": pending_amb, "pending_merch_refr": pending_ref,
                 "loaders": self._loaders,
                 "counts": {
-                    "queued": len(queued_amb),
-                    "queued_refr": len(queued_ref),
-                    "assigned": len(assigned_amb),
-                    "assigned_refr": len(assigned_ref),
-                    "done": len(done),
-                    "pending_merch": len(pending_amb),
+                    "queued":           len(queued_amb),
+                    "queued_refr":      len(queued_ref),
+                    "assigned":         len(assigned_amb),
+                    "assigned_refr":    len(assigned_ref),
+                    "done":             len(done),
+                    "pending_merch":    len(pending_amb),
                     "pending_merch_refr": len(pending_ref),
-                    "blocked": blocked_count,
+                    "blocked":          blocked_count,
                 },
             }
 
@@ -669,7 +725,7 @@ class QueueManager:
         with self._lock:
             for l in self._loaders:
                 if l.get("active") and str(l.get("pin", "")) == str(pin).strip():
-                    return dict(l)  # copia
+                    return dict(l)
             return None
 
     def upsert_loader(self, loader: dict) -> dict:
@@ -677,19 +733,12 @@ class QueueManager:
             existing = self._get_loader(loader.get("id", ""))
             if existing:
                 existing.update(loader)
+                self._save_loader(existing)
             else:
-                self._loaders.append({**loader, "active": True})
-            self._save_loaders()
+                new_loader = {**loader, "active": True}
+                self._loaders.append(new_loader)
+                self._save_loader(new_loader)
             return {"ok": True, "loaders": self._loaders}
-
-    def update_item_fields(self, item_id: str, fields: dict) -> None:
-        """Actualiza campos concretos de un item en cola y persiste. Uso interno."""
-        with self._lock:
-            for it in self._items:
-                if it["id"] == item_id:
-                    it.update(fields)
-                    self._save()
-                    return
 
     def remove_loader(self, loader_id: str) -> dict:
         with self._lock:
@@ -697,19 +746,21 @@ class QueueManager:
             self._loaders = [l for l in self._loaders if l["id"] != loader_id]
             if len(self._loaders) == before:
                 return {"ok": False, "error": f"Cargador {loader_id} no encontrado"}
-            self._save_loaders()
+            with self._conn() as conn:
+                conn.execute("DELETE FROM loaders WHERE id=?", (loader_id,))
+                conn.commit()
             return {"ok": True, "loaders": self._loaders}
 
     def reset_done(self) -> dict:
-        """Borra los completados (por si el supervisor quiere limpiar el historial)."""
+        """Borra el historial de completadas."""
         with self._lock:
-            self._items = [it for it in self._items if it["status"] != "done"]
-            self._save()
+            with self._conn() as conn:
+                conn.execute("DELETE FROM items WHERE status='done'")
+                conn.commit()
             return {"ok": True}
 
     def reset_queued(self, queue_type: Optional[str] = None) -> dict:
-        """Borra los items pendientes (queued y pending_merch) para recargar el Excel.
-        Si se indica queue_type, solo afecta a esa cola (ambiente/refrigerado)."""
+        """Borra los items pendientes (queued y pending_merch) para recargar el Excel."""
         with self._lock:
             def _match(it):
                 if it["status"] not in ("queued", "pending_merch"):
@@ -717,13 +768,18 @@ class QueueManager:
                 if queue_type and it.get("queue_type", "ambiente") != queue_type:
                     return False
                 return True
-            before = len([it for it in self._items if _match(it)])
+            to_remove = [it for it in self._items if _match(it)]
+            before = len(to_remove)
+            ids = [it["id"] for it in to_remove]
             self._items = [it for it in self._items if not _match(it)]
-            self._save()
+            if ids:
+                with self._conn() as conn:
+                    conn.executemany("DELETE FROM items WHERE id=?", [(i,) for i in ids])
+                    conn.commit()
             return {"ok": True, "removed": before}
 
 
-# Singleton
+# ─── Singleton ─────────────────────────────────────────────────
 _manager: Optional[QueueManager] = None
 
 def get_manager() -> QueueManager:

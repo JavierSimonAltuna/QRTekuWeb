@@ -12,6 +12,18 @@ const fmtTime = (iso) => {
   } catch (_) { return ""; }
 };
 
+const CHECKLIST_ITEMS = [
+  { key: "puertas",        label: "Puertas del remolque en buen estado" },
+  { key: "suciedad_suelo", label: "Suciedad en el suelo" },
+  { key: "suciedad_pared", label: "Suciedad en paredes/techo" },
+  { key: "olores",         label: "Olores" },
+  { key: "humedad_hongos", label: "Humedad / hongos" },
+  { key: "plagas",         label: "Plagas" },
+  { key: "desperfectos",   label: "Desperfectos en paredes/techo" },
+  { key: "apto_alimentaria", label: "Remolque apto para carga alimentaria" },
+  { key: "temperatura",    label: "Temperatura correcta (solo refrigerado)" },
+];
+
 // ───────────────────────────────────────────────────────────────
 // App raíz
 // ───────────────────────────────────────────────────────────────
@@ -32,6 +44,7 @@ const LoaderApp = () => {
   const [requesting, setRequesting] = useState(false);
   const [refreshingPrec, setRefreshingPrec] = useState(false);
   const [toast, setToast] = useState(null);
+  const [pendingChecklist, setPendingChecklist] = useState(null);
 
   const showToast = (text) => {
     setToast(text);
@@ -113,15 +126,15 @@ const LoaderApp = () => {
     setRefreshingPrec(false);
   };
 
-  const handleFinalize = () => setScreen("confirming");
-  const handleCancelConfirm = () => setScreen("assigned");
+  const handleFinalize = (checklist) => { setPendingChecklist(checklist || null); setScreen("confirming"); };
+  const handleCancelConfirm = () => { setPendingChecklist(null); setScreen("assigned"); };
 
   const handleConfirmFinish = async () => {
     if (!loader || !item) return;
     setCompletedInfo({ muelle: item.muelle, time: new Date().toLocaleTimeString("es-ES", { hour12: false }) });
     setScreen("completing");
     try {
-      const r = await window.api.call("loader_finish", loader.id, item.id);
+      const r = await window.api.call("loader_finish", loader.id, item.id, pendingChecklist || null);
       if (r.ok) {
         // Pequeña pausa para mostrar la animación, luego asignar siguiente
         setTimeout(() => {
@@ -321,6 +334,8 @@ const WaitingScreen = ({ loader, queuedCount, requesting, onRequest, onLogout })
 // ───────────────────────────────────────────────────────────────
 const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecintos, refreshingPrec, onLogout, onSetLoadStart, onSetLoadEnd }) => {
   const tipoRefr = item.tipo_carga === "REFRIGERADO";
+  const [checklist, setChecklist] = useState({});
+  const toggleCheck = (key, val) => setChecklist(prev => ({ ...prev, [key]: val }));
   return (
     <div style={LS.assignRoot}>
       {/* ─── Top bar ─── */}
@@ -472,11 +487,46 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
           </div>
         </div>
 
+        {/* ─── Checklist inspección (solo cargas manuales) ─── */}
+        {item.source === "manual" && (
+          <div style={LS.checklistCard}>
+            <div style={LS.checklistTitle}>INSPECCIÓN DEL REMOLQUE</div>
+            {CHECKLIST_ITEMS.map(({ key, label }) => {
+              const val = checklist[key];
+              return (
+                <div key={key} style={LS.checklistRow}>
+                  <span style={LS.checklistLabel}>{label}</span>
+                  <div style={LS.checklistBtns}>
+                    <button
+                      onClick={() => toggleCheck(key, true)}
+                      style={{
+                        ...LS.checklistBtn,
+                        background: val === true ? "#22c55e" : "#f4f4f3",
+                        color: val === true ? "#fff" : "#78716c",
+                        fontWeight: val === true ? 700 : 500,
+                      }}
+                    >S</button>
+                    <button
+                      onClick={() => toggleCheck(key, false)}
+                      style={{
+                        ...LS.checklistBtn,
+                        background: val === false ? "#dc2626" : "#f4f4f3",
+                        color: val === false ? "#fff" : "#78716c",
+                        fontWeight: val === false ? 700 : 500,
+                      }}
+                    >N</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         <div style={{ height: 100 }} /> {/* spacer para el botón fijo */}
       </div>
 
       {/* ─── Botón finalizar (fijo) ─── */}
-      <button onClick={onFinalize} style={LS.finalizeBtn}>
+      <button onClick={() => onFinalize(checklist)} style={LS.finalizeBtn}>
         <span style={{ fontSize: 17, fontWeight: 700 }}>✓</span>
         <span>FINALIZAR CARGA</span>
       </button>
@@ -761,6 +811,14 @@ const LS = {
   precRowCode: { fontSize: 17, fontWeight: 700, letterSpacing: -0.2, color: "#1c1917", fontFamily: "ui-monospace, monospace", marginTop: 2 },
   precEmpty: { fontSize: 12, color: "#a8a29e", textAlign: "center", padding: "12px 0" },
   barcode: { display: "flex", alignItems: "stretch", gap: 0, height: 28, marginTop: 6 },
+
+  // ── Checklist ──────────────────────────────────
+  checklistCard: { background: "#fff", borderRadius: 14, padding: "14px 16px", marginTop: 10, border: "1px solid #e7e5e4" },
+  checklistTitle: { fontSize: 9.5, fontWeight: 700, letterSpacing: 1.2, color: "#a8a29e", textTransform: "uppercase", marginBottom: 12 },
+  checklistRow: { display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 8, marginBottom: 8, borderBottom: "1px solid #f4f4f3" },
+  checklistLabel: { fontSize: 12.5, fontWeight: 500, color: "#1c1917", flex: 1, paddingRight: 10, lineHeight: 1.35 },
+  checklistBtns: { display: "flex", gap: 6, flexShrink: 0 },
+  checklistBtn: { width: 36, height: 36, borderRadius: 8, border: "none", fontSize: 13, cursor: "pointer", fontFamily: "inherit", transition: "background 100ms, color 100ms" },
 
   // ── Botón finalizar ────────────────────────────
   finalizeBtn: { position: "sticky", bottom: 0, left: 0, right: 0, width: "100%", padding: "20px 18px", background: "#dc2626", color: "#fff", border: "none", fontSize: 16, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 -4px 16px rgba(0,0,0,0.08)" },
