@@ -440,14 +440,19 @@ def load_excel(path: str) -> tuple[list[dict], str]:
         if not muelle and len(df.columns) > 11:
             muelle = _safe_str(r.iloc[11])
         # HORA ACULE (columna AA = índice 26)
+        # '0.0'/'0' = celda de hora vacía con formato de hora en Excel → no aculado
         hora_acule = ""
         for col in df.columns:
             cu = str(col).upper().replace("\n", "").replace(" ", "").replace("\t", "")
-            if not hora_acule and "ACULE" in cu:
-                hora_acule = _norm_hora(r.get(col, ""))
+            if "ACULE" in cu:
+                raw_v = str(r.get(col, "")).strip()
+                if raw_v not in ("0.0", "0", "0.00", "", "nan"):
+                    hora_acule = _norm_hora(r.get(col, ""))
                 break
         if not hora_acule and len(df.columns) > 26:
-            hora_acule = _norm_hora(r.iloc[26])
+            raw_v = str(r.iloc[26]).strip()
+            if raw_v not in ("0.0", "0", "0.00", "", "nan"):
+                hora_acule = _norm_hora(r.iloc[26])
         aculado = bool(hora_acule.strip())
 
         # HORA SALIDA PREVISTA — columna detectada por cabecera o fallback AB (índice 27).
