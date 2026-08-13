@@ -167,11 +167,26 @@ class QueueManager:
                 except Exception:
                     pass
             if not self._loaders:
-                self._loaders = list(DEFAULT_LOADERS)
-                for l in self._loaders:
-                    conn.execute("INSERT OR REPLACE INTO loaders VALUES (?,?)",
-                                 (l["id"], json.dumps(l, ensure_ascii=False)))
-                conn.commit()
+                # Intentar migrar desde JSON legacy antes de usar defaults
+                legacy_imported = False
+                if LOADERS_FILE.exists():
+                    try:
+                        legacy = json.loads(LOADERS_FILE.read_text(encoding="utf-8"))
+                        if legacy:
+                            self._loaders = legacy
+                            for l in self._loaders:
+                                conn.execute("INSERT OR REPLACE INTO loaders VALUES (?,?)",
+                                             (l["id"], json.dumps(l, ensure_ascii=False)))
+                            conn.commit()
+                            legacy_imported = True
+                    except Exception:
+                        pass
+                if not legacy_imported:
+                    self._loaders = list(DEFAULT_LOADERS)
+                    for l in self._loaders:
+                        conn.execute("INSERT OR REPLACE INTO loaders VALUES (?,?)",
+                                     (l["id"], json.dumps(l, ensure_ascii=False)))
+                    conn.commit()
 
         # Migrar desde JSON legacy si la DB estaba vacía
         if not self._items and self._counter == 0 and QUEUE_FILE.exists():
@@ -788,6 +803,32 @@ class QueueManager:
                 conn.execute("DELETE FROM items WHERE status='done'")
                 conn.commit()
             return {"ok": True}
+
+    def import_loaders_from_json(self) -> dict:
+        """Importa bleecker_loaders.json y hace upsert de todos los cargadores encontrados."""
+        if not LOADERS_FILE.exists():
+            return {"ok": False, "error": f"Archivo no encontrado: {LOADERS_FILE}"}
+        try:
+            loaders = json.loads(LOADERS_FILE.read_text(encoding="utf-8"))
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+        if not isinstance(loaders, list) or not loaders:
+            return {"ok": False, "error": "El archivo no contiene una lista de cargadores"}
+        imported = 0
+        with self._lock:
+            for l in loaders:
+                if not isinstance(l, dict) or not l.get("id"):
+                    continue
+                existing = self._get_loader(l["id"])
+                if existing:
+                    existing.update(l)
+                    self._save_loader(existing)
+                else:
+                    new_l = {**l, "active": True}
+                    self._loaders.append(new_l)
+                    self._save_loader(new_l)
+                imported += 1
+        return {"ok": True, "imported": imported, "total": len(self._loaders)}
 
     def reset_queued(self, queue_type: Optional[str] = None) -> dict:
         """Borra los items pendientes (queued y pending_merch) para recargar el Excel."""

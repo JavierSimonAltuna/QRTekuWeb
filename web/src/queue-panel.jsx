@@ -155,6 +155,12 @@ const QueuePanel = ({ pushToast }) => {
     else pushToast(r.error || "Error", "error");
   };
 
+  const handleImportLoadersJson = async () => {
+    const r = await window.api.call("loader_import_json");
+    if (r.ok) { pushToast(`${r.imported} cargador(es) importados desde bleecker_loaders.json`, "success"); refresh(); }
+    else pushToast(r.error || "No se pudo importar", "error");
+  };
+
   const openManualCarga = (defaultType = "ambiente") => setManualForm({
     destino: "", queue_type: defaultType, tractora: "", remolque: "",
     muelle: "", playa: "", hora_salida: "", cam: "", cod_centro: "",
@@ -413,6 +419,7 @@ const QueuePanel = ({ pushToast }) => {
               <span style={QS.colTitle}>Cargadores</span>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={QS.colCount}>{ambLoaders.filter((l) => l.active).length}</span>
+                <button onClick={handleImportLoadersJson} style={{ ...QS.addLoaderBtn, background: "#f0fdf4", color: "#166534", borderColor: "#bbf7d0" }} title="Importar cargadores desde bleecker_loaders.json">↑ JSON</button>
                 <button onClick={() => openNewLoader("ambiente")} style={QS.addLoaderBtn} title="Añadir cargador ambiente">+ Cargador</button>
               </div>
             </div>

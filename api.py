@@ -948,6 +948,13 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def loader_import_json(self) -> dict:
+        """Importar cargadores desde bleecker_loaders.json (migración manual)."""
+        try:
+            return queue_manager.get_manager().import_loaders_from_json()
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def get_odbc_diagnostics(self) -> dict:
         """Devuelve el log de operaciones ODBC recientes para diagnóstico."""
         try:
