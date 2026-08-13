@@ -735,11 +735,58 @@ class Api:
     # ──────────────────────────────────────────────────────────────
     # COLA BLEECKER — helpers internos
     # ──────────────────────────────────────────────────────────────
+    def _enrich_qr_if_empty(self, item: dict) -> None:
+        """Si el item no tiene CIF o agencia, intenta rellenarlos por ODBC y
+        regenera el QR PNG. Se llama al asignar la carga al cargador."""
+        if not item:
+            return
+        cif = (item.get("cif") or "").strip()
+        agencia = (item.get("agencia") or "").strip()
+        if cif and agencia:
+            return  # ya completo
+        tractora = (item.get("tractora") or item.get("matriculas", "").split("/")[0]).strip()
+        if not tractora:
+            return
+        try:
+            new_cif, new_agencia = core.odbc_lookup_chf(tractora)
+        except Exception:
+            return
+        updated: dict = {}
+        if new_cif and not cif:
+            item["cif"] = new_cif
+            updated["cif"] = new_cif
+        if new_agencia and not agencia:
+            item["agencia"] = new_agencia
+            updated["agencia"] = new_agencia
+        if not updated:
+            return
+        # Regenerar QR con los datos nuevos
+        try:
+            import json as _json, base64 as _b64
+            compact = item.get("qr_payload_compact", "")
+            if compact:
+                payload = _json.loads(compact)
+                payload["C"] = item["cif"]
+                payload["E"] = item["agencia"]
+                compact = _json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+                png_bytes = core.make_qr_png(compact)
+                item["qr_png_b64"] = "data:image/png;base64," + _b64.b64encode(png_bytes).decode()
+                item["qr_payload_compact"] = compact
+                updated["qr_png_b64"] = item["qr_png_b64"]
+                updated["qr_payload_compact"] = compact
+        except Exception:
+            pass
+        try:
+            queue_manager.get_manager().update_item_fields(item["id"], updated)
+        except Exception:
+            pass
+
     def _refresh_precintos(self, item: dict) -> bool:
         """Actualiza precintos del item desde las filas del Excel en memoria.
         El QR no incluye precintos (el campo "P" es para otra cosa), así que
         solo se actualiza la lista para mostrar en la app del cargador.
         Devuelve True si hubo cambios."""
+        self._enrich_qr_if_empty(item)
         if not item or not self._rows:
             return False
         viaje_n = str(item.get("viaje_n", "")).strip()
