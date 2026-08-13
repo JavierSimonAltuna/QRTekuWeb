@@ -554,10 +554,18 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
         <div style={{ height: 100 }} /> {/* spacer para el botón fijo */}
       </div>
 
-      {/* ─── Botón finalizar (fijo) ─── */}
-      <button onClick={() => onFinalize(checklist)} style={LS.finalizeBtn}>
+      {/* ─── Botón finalizar (fijo) — requiere inicio de carga ─── */}
+      <button
+        onClick={() => onFinalize(checklist)}
+        disabled={!item.load_start_at}
+        style={{
+          ...LS.finalizeBtn,
+          background: item.load_start_at ? "#dc2626" : "#a8a29e",
+          cursor: item.load_start_at ? "pointer" : "not-allowed",
+        }}
+      >
         <span style={{ fontSize: 17, fontWeight: 700 }}>✓</span>
-        <span>FINALIZAR CARGA</span>
+        <span>{item.load_start_at ? "FINALIZAR CARGA" : "Marca inicio de carga para finalizar"}</span>
       </button>
     </div>
   );
