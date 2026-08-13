@@ -402,34 +402,32 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
           </div>
         </div>
 
-        {/* ─── QR card (solo cargas automáticas, no manuales) ─── */}
-        {item.source !== "manual" && (
-          <div style={LS.qrCard}>
-            <div style={LS.qrCardHead}>
-              <span style={LS.qrCardKicker}>CARGA TEKU · CÓDIGO BLEECKER</span>
-              <span style={{
-                ...LS.tipoPill,
-                background: tipoRefr ? "#0ea5e9" : "#fb923c",
-                color: "#fff",
-              }}>
-                {tipoRefr ? "❄ REFRIGERADO" : "☼ AMBIENTE"}
-              </span>
-            </div>
-            <div style={LS.qrCardTitle}>EXP. {(item.destino || "").toUpperCase()}</div>
-            <div style={LS.qrWrap}>
-              {item.qr_png_b64 ? (
-                <img src={item.qr_png_b64} alt="QR" style={LS.qrImg} />
-              ) : (
-                <div style={LS.qrPlaceholder}>QR no disponible</div>
-              )}
-            </div>
-            <div style={LS.qrSubtle}>QR TEKU / BLEECKER</div>
-            <div style={LS.qrFoot}>
-              <div style={LS.qrFootL}>{item.agencia || ""} {item.cif ? ` · CIF ${item.cif}` : ""}</div>
-              <div style={LS.qrFootR}>{(item.queued_at || "").replace("T", " ").slice(0, 16)}</div>
-            </div>
+        {/* ─── QR card (todas las cargas) ─── */}
+        <div style={LS.qrCard}>
+          <div style={LS.qrCardHead}>
+            <span style={LS.qrCardKicker}>CARGA TEKU · CÓDIGO BLEECKER</span>
+            <span style={{
+              ...LS.tipoPill,
+              background: tipoRefr ? "#0ea5e9" : "#fb923c",
+              color: "#fff",
+            }}>
+              {tipoRefr ? "❄ REFRIGERADO" : "☼ AMBIENTE"}
+            </span>
           </div>
-        )}
+          <div style={LS.qrCardTitle}>EXP. {(item.destino || "").toUpperCase()}</div>
+          <div style={LS.qrWrap}>
+            {item.qr_png_b64 ? (
+              <img src={item.qr_png_b64} alt="QR" style={LS.qrImg} />
+            ) : (
+              <div style={LS.qrPlaceholder}>QR no disponible</div>
+            )}
+          </div>
+          <div style={LS.qrSubtle}>QR TEKU / BLEECKER</div>
+          <div style={LS.qrFoot}>
+            <div style={LS.qrFootL}>{item.agencia || ""} {item.cif ? ` · CIF ${item.cif}` : ""}</div>
+            <div style={LS.qrFootR}>{(item.queued_at || "").replace("T", " ").slice(0, 16)}</div>
+          </div>
+        </div>
 
         {/* ─── Comentario del supervisor ─── */}
         {item.comment && (
