@@ -255,7 +255,7 @@ const LoginScreen = ({ onLogin }) => {
         />
         <div style={{ display: "none", flexDirection: "column", alignItems: "center", gap: 6 }}>
           <div style={LS.loginLogo}>P</div>
-          <div style={LS.loginBrand}>PULSO 5.0</div>
+          <div style={LS.loginBrand}>PULSO 6.0</div>
         </div>
         <div style={LS.loginSubtitle}>App Cargador · Bleecker</div>
       </div>

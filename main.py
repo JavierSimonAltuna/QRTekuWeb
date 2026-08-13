@@ -70,7 +70,7 @@ def main():
         import tkinter as tk
         from tkinter import messagebox
         root = tk.Tk(); root.withdraw()
-        messagebox.showerror("PULSO 5.0 · Error",
+        messagebox.showerror("PULSO 6.0 · Error",
                              f"No se encontró web/index.html\nEsperado en: {web_dir}")
         return
 
@@ -86,7 +86,7 @@ def main():
     print(f"[PULSO] Cargador (móvil LAN): {loader_url_lan}\n")
 
     window = webview.create_window(
-        title="PULSO 5.0 · Garvasa",
+        title="PULSO 6.0 · Garvasa",
         url=url,
         js_api=api,
         width=1440,
