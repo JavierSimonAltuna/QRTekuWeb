@@ -53,6 +53,7 @@ const QRTekuApp = () => {
   const [excelSessions, setExcelSessions] = useState([]);
   const [showExcelPicker, setShowExcelPicker] = useState(false);
   const [serverInfo, setServerInfo] = useState(null);
+  const prevAculadoCountRef = useRef(null); // para detectar nuevos acules en el polling HTTP
   const winW = useWindowWidth();
   const isTablet = winW < 1100;
   // En tablet, controla si mostrar la lista o el detalle
@@ -63,6 +64,19 @@ const QRTekuApp = () => {
     const id = Math.random().toString(36).slice(2);
     setToasts((t) => [...t, { id, text, type }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200);
+  }, []);
+
+  const beepAcule = useCallback(() => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.35, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+      osc.start(); osc.stop(ctx.currentTime + 0.6);
+    } catch (_) {}
   }, []);
 
   // ── PyWebView detection ────────────────────────────────────────
@@ -105,16 +119,7 @@ const QRTekuApp = () => {
           });
           if (res.auto_enqueued > 0) {
             pushToast(`${res.auto_enqueued} carga(s) añadidas a la cola Bleecker`, "success");
-            try {
-              const ctx = new (window.AudioContext || window.webkitAudioContext)();
-              const osc = ctx.createOscillator();
-              const gain = ctx.createGain();
-              osc.connect(gain); gain.connect(ctx.destination);
-              osc.frequency.value = 880;
-              gain.gain.setValueAtTime(0.35, ctx.currentTime);
-              gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
-              osc.start(); osc.stop(ctx.currentTime + 0.6);
-            } catch (_) {}
+            beepAcule();
           }
         }
       } catch (e) { /* silencio */ }
@@ -143,6 +148,13 @@ const QRTekuApp = () => {
             try { res = await window.api.call("reload_excel"); } catch (_) {}
           }
           if (alive && res && res.ok) {
+            const newAculCount = (res.rows || []).filter(r => r.aculado && !r.ya_cargado).length;
+            if (prevAculadoCountRef.current !== null && newAculCount > prevAculadoCountRef.current) {
+              const diff = newAculCount - prevAculadoCountRef.current;
+              pushToast(`${diff} camión(es) aculado(s)`, "success");
+              beepAcule();
+            }
+            prevAculadoCountRef.current = newAculCount;
             setRows(res.rows);
             setFileInfo((prev) => prev || {
               name: res.filename, count: res.count, fecha: res.fecha_b2, path: res.filename,
