@@ -78,8 +78,10 @@ const QueuePanel = ({ pushToast }) => {
 
   const handleReassign = async (id, loaderId) => {
     const r = await window.api.call("queue_reassign", id, loaderId);
-    if (r.ok) { pushToast("Reasignada", "success"); refresh(); setReassignFor(null); }
-    else pushToast(r.error || "Error", "error");
+    if (r.ok) {
+      pushToast(r.reserved ? `Reservada para ${loaderId} (cargador ocupado)` : "Reasignada", r.reserved ? "info" : "success");
+      refresh(); setReassignFor(null);
+    } else pushToast(r.error || "Error", "error");
   };
 
   const handleForceQueued = async (id) => {
@@ -1059,6 +1061,11 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onR
         <span style={QS.cardPos}>{String(position).padStart(2, "0")}</span>
         <span style={QS.cardTicket}>{item.id}</span>
         {item.is_combined && <ComboBadge />}
+        {item.reserved_for && (
+          <span style={{ fontSize: 9, fontWeight: 700, background: "#ede9fe", color: "#6d28d9", padding: "2px 6px", borderRadius: 999, letterSpacing: 0.5, whiteSpace: "nowrap" }}>
+            ⏳ RESERVADA · {item.reserved_for}
+          </span>
+        )}
         {item.blocked && (
           <span style={{ fontSize: 9, fontWeight: 700, background: "#fef3c7", color: "#d97706", padding: "2px 6px", borderRadius: 999, letterSpacing: 0.5 }}>
             🔒 BLOQUEADA

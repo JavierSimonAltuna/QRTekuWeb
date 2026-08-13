@@ -418,6 +418,7 @@ class QueueManager:
             "touliv1": row.get("touliv1"), "ruta_carga": row.get("ruta_carga"),
             "comment": "", "blocked": False, "helper_id": None,
             "load_start_at": None, "load_end_at": None, "checklist": None, "photos": [],
+            "reserved_for": None,
         }
 
     @staticmethod
@@ -469,20 +470,31 @@ class QueueManager:
                 return None
             muelle_loader = loader.get("muelle_actual", "00")
             loader_qt     = loader.get("queue_type", "ambiente")
-            pool = [it for it in self._items
-                    if it["status"] == "queued" and not it.get("blocked")
-                    and it.get("queue_type", "ambiente") == loader_qt]
-            if not pool:
-                return None
-            pool.sort(key=lambda it: (
-                0 if it["urgente"] else 1,
-                self._parse_time(it["hora_salida"]),
-                self._muelle_distance(muelle_loader, it["muelle"]),
-            ))
-            chosen = pool[0]
-            chosen["status"]      = "assigned"
-            chosen["assigned_to"] = loader_id
-            chosen["assigned_at"] = datetime.now().isoformat(timespec="seconds")
+
+            # Primero: items reservados específicamente para este cargador
+            reserved = [it for it in self._items
+                        if it["status"] == "queued" and it.get("reserved_for") == loader_id]
+            if reserved:
+                chosen = reserved[0]
+            else:
+                # Pool normal: excluir items reservados para otros cargadores
+                pool = [it for it in self._items
+                        if it["status"] == "queued" and not it.get("blocked")
+                        and it.get("queue_type", "ambiente") == loader_qt
+                        and not it.get("reserved_for")]
+                if not pool:
+                    return None
+                pool.sort(key=lambda it: (
+                    0 if it["urgente"] else 1,
+                    self._parse_time(it["hora_salida"]),
+                    self._muelle_distance(muelle_loader, it["muelle"]),
+                ))
+                chosen = pool[0]
+
+            chosen["status"]       = "assigned"
+            chosen["assigned_to"]  = loader_id
+            chosen["assigned_at"]  = datetime.now().isoformat(timespec="seconds")
+            chosen["reserved_for"] = None
             self._persist_item(chosen)
             self._add_audit("asignada", item_id=chosen["id"], destino=chosen.get("destino"),
                             loader_id=loader_id, muelle=chosen.get("muelle"),
@@ -539,17 +551,30 @@ class QueueManager:
 
     def reassign(self, item_id: str, new_loader_id: str) -> dict:
         with self._lock:
+            # Comprobar si el cargador destino ya tiene una carga en curso
+            target_busy = any(
+                it["status"] == "assigned" and it["assigned_to"] == new_loader_id
+                for it in self._items
+            )
             for it in self._items:
                 if it["id"] == item_id and it["status"] in ("queued", "assigned"):
-                    prev_loader       = it.get("assigned_to")
-                    it["assigned_to"] = new_loader_id
-                    it["status"]      = "assigned"
-                    it["assigned_at"] = datetime.now().isoformat(timespec="seconds")
+                    prev_loader = it.get("assigned_to")
+                    if target_busy:
+                        # Cargador ocupado: reservar para él sin asignar todavía
+                        it["status"]       = "queued"
+                        it["assigned_to"]  = None
+                        it["reserved_for"] = new_loader_id
+                        it["urgente"]      = True   # sube al principio de su cola
+                    else:
+                        it["status"]       = "assigned"
+                        it["assigned_to"]  = new_loader_id
+                        it["assigned_at"]  = datetime.now().isoformat(timespec="seconds")
+                        it["reserved_for"] = None
                     self._persist_item(it)
                     self._add_audit("reasignada", item_id=item_id, destino=it.get("destino"),
                                     loader_id=new_loader_id, prev_loader_id=prev_loader,
-                                    viaje_n=it.get("viaje_n"))
-                    return {"ok": True, "item": it}
+                                    viaje_n=it.get("viaje_n"), reserved=target_busy)
+                    return {"ok": True, "item": it, "reserved": target_busy}
             return {"ok": False, "error": "No encontrado"}
 
     def set_comment(self, item_id: str, comment: str) -> dict:
