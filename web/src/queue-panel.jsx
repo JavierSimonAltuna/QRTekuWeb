@@ -822,15 +822,15 @@ const OdbcModal = ({ log, onClose }) => (
 // ───────────────────────────────────────────────────────────────
 const DebugLogModal = ({ lines, onClose, onRefresh }) => {
   const levelColor = (line) => {
-    if (line.includes(" [ERROR] "))   return { color: "#b91c1c", background: "#fff1f2" };
-    if (line.includes(" [WARNING] ")) return { color: "#b45309", background: "#fffbeb" };
+    if (line.includes(" [ERROR] "))   return { color: "#fca5a5", background: "rgba(185,28,28,0.18)" };
+    if (line.includes(" [WARNING] ")) return { color: "#fcd34d", background: "rgba(180,83,9,0.15)" };
     if (line.includes(" [DEBUG] "))   return { color: "#6b7280", background: "transparent" };
-    return { color: "#1c1917", background: "transparent" };
+    return { color: "#d6d3d1", background: "transparent" };
   };
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 9100, display: "flex", alignItems: "center", justifyContent: "center" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: "#0c0a09", borderRadius: 12, width: 860, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", overflow: "hidden" }}>
+      <div style={{ background: "#0c0a09", borderRadius: 12, width: 900, maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: "1px solid #292524" }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: "#fafaf9", fontFamily: "ui-monospace, monospace" }}>pulso_debug.log</span>
           <div style={{ display: "flex", gap: 8 }}>
@@ -846,7 +846,7 @@ const DebugLogModal = ({ lines, onClose, onRefresh }) => {
           ) : [...lines].reverse().map((line, i) => {
             const s = levelColor(line);
             return (
-              <div key={i} style={{ padding: "2px 16px", fontFamily: "ui-monospace, monospace", fontSize: 11, lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-all", background: s.background, color: s.color }}>
+              <div key={i} style={{ padding: "3px 16px", fontFamily: "ui-monospace, monospace", fontSize: 12.5, lineHeight: 1.7, whiteSpace: "pre-wrap", wordBreak: "break-all", background: s.background, color: s.color }}>
                 {line}
               </div>
             );

@@ -579,8 +579,8 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
           />
         </div>
 
-        {/* ─── Checklist inspección (solo cargas manuales) ─── */}
-        {item.source === "manual" && (
+        {/* ─── Checklist inspección (solo cargas manuales, no combinadas) ─── */}
+        {item.source === "manual" && !item.is_combined && (
           <div style={LS.checklistCard}>
             <div style={LS.checklistTitle}>INSPECCIÓN DEL REMOLQUE</div>
             {CHECKLIST_ITEMS.map(({ key, label }) => {
@@ -617,18 +617,13 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
         <div style={{ height: 100 }} /> {/* spacer para el botón fijo */}
       </div>
 
-      {/* ─── Botón finalizar (fijo) — requiere inicio de carga ─── */}
+      {/* ─── Botón finalizar (fijo) ─── */}
       <button
         onClick={() => onFinalize(checklist, photos)}
-        disabled={!item.load_start_at}
-        style={{
-          ...LS.finalizeBtn,
-          background: item.load_start_at ? "#dc2626" : "#a8a29e",
-          cursor: item.load_start_at ? "pointer" : "not-allowed",
-        }}
+        style={{ ...LS.finalizeBtn }}
       >
         <span style={{ fontSize: 17, fontWeight: 700 }}>✓</span>
-        <span>{item.load_start_at ? "FINALIZAR CARGA" : "Marca inicio de carga para finalizar"}</span>
+        <span>FINALIZAR CARGA</span>
       </button>
     </div>
   );
