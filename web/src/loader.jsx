@@ -342,6 +342,10 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
   // Mostrar playa por precinto si los precintos tienen playas distintas entre sí
   const distinctPlayas = new Set((item.precintos || []).map(p => p.playa).filter(Boolean));
   const showPlayaPerPrec = distinctPlayas.size > 1;
+  const distinctDestinos = new Set((item.precintos || []).map(p => p.centro).filter(Boolean));
+  const isCombinedTrip = item.is_combined ||
+    (item.trip_destinos && item.trip_destinos.length > 1) ||
+    distinctDestinos.size > 1;
 
   const handlePhotoCapture = (e) => {
     const file = e.target.files && e.target.files[0];
@@ -485,7 +489,7 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
         )}
 
         {/* ─── Trazabilidad: inicio / fin carga (solo cargas manuales) ─── */}
-        {item.source === "manual" && !item.is_combined && (
+        {item.source === "manual" && !isCombinedTrip && (
           <div style={LS.timeCard}>
             <div style={LS.timeCardLabel}>TRAZABILIDAD DE CARGA</div>
             <div style={LS.timeRow}>
@@ -582,7 +586,7 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
         </div>
 
         {/* ─── Checklist inspección (solo cargas manuales, no combinadas) ─── */}
-        {item.source === "manual" && !item.is_combined && (
+        {item.source === "manual" && !isCombinedTrip && (
           <div style={LS.checklistCard}>
             <div style={LS.checklistTitle}>INSPECCIÓN DEL REMOLQUE</div>
             {CHECKLIST_ITEMS.map(({ key, label }) => {
