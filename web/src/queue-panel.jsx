@@ -4,6 +4,18 @@
 
 const { useState, useEffect, useCallback } = React;
 
+const CHECKLIST_LABELS = [
+  { key: "puertas",          label: "Puertas en buen estado" },
+  { key: "suciedad_suelo",   label: "Suciedad en suelo" },
+  { key: "suciedad_pared",   label: "Suciedad paredes/techo" },
+  { key: "olores",           label: "Olores" },
+  { key: "humedad_hongos",   label: "Humedad / hongos" },
+  { key: "plagas",           label: "Plagas" },
+  { key: "desperfectos",     label: "Desperfectos" },
+  { key: "apto_alimentaria", label: "Apto alimentaria" },
+  { key: "temperatura",      label: "Temperatura correcta" },
+];
+
 const useWindowWidth = () => {
   const [w, setW] = useState(window.innerWidth);
   useEffect(() => {
@@ -103,7 +115,7 @@ const QueuePanel = ({ pushToast }) => {
 
   const handleSendToPendingMerch = async (id) => {
     const r = await window.api.call("queue_send_to_pending_merch", id);
-    if (r.ok) { pushToast("Movido a Sin mercancía", "info"); refresh(); setActiveTab("sinmerch"); }
+    if (r.ok) { pushToast("Movido a Sin mercancía", "info"); refresh(); }
     else pushToast(r.error || "Error", "error");
   };
 
@@ -222,7 +234,7 @@ const QueuePanel = ({ pushToast }) => {
   const pendingMerchRefri = snap.pending_merch_refr || [];
   const ambLoaders   = snap.loaders.filter(l => (l.queue_type || "ambiente") === "ambiente").sort((a,b) => a.id.localeCompare(b.id));
   const refriLoaders = snap.loaders.filter(l => (l.queue_type || "ambiente") === "refrigerado").sort((a,b) => a.id.localeCompare(b.id));
-  const isRefriTab = activeTab === "cola_refri" || activeTab === "sinmerch_refri";
+  const isRefriTab = activeTab === "cola_refri";
 
   const makePendingGroups = (items) => {
     const map = {};
@@ -292,32 +304,12 @@ const QueuePanel = ({ pushToast }) => {
           )}
         </button>
         <button
-          onClick={() => setActiveTab("sinmerch")}
-          style={{ ...QS.tab, ...(activeTab === "sinmerch" ? QS.tabActive : {}), ...(pendingGroups.length > 0 ? { color: "#d97706" } : {}) }}
-        >
-          ⚠ Sin merch AMB
-          {pendingGroups.length > 0 && (
-            <span style={{ ...QS.tabBadge, background: "#fef3c7", color: "#d97706" }}>
-              {pendingMerch.length}
-            </span>
-          )}
-        </button>
-        <button
           onClick={() => setActiveTab("cola_refri")}
           style={{ ...QS.tab, ...(activeTab === "cola_refri" ? { ...QS.tabActive, borderBottomColor: "#0ea5e9", color: "#0c4a6e" } : {}) }}
         >
           ❄ Cola refri
           {(snap.counts.queued_refr || 0) > 0 && (
             <span style={{ ...QS.tabBadge, background: "#dbeafe", color: "#0c4a6e" }}>{snap.counts.queued_refr}</span>
-          )}
-        </button>
-        <button
-          onClick={() => setActiveTab("sinmerch_refri")}
-          style={{ ...QS.tab, ...(activeTab === "sinmerch_refri" ? { ...QS.tabActive, borderBottomColor: "#0ea5e9", color: "#0c4a6e" } : {}), ...(pendingGroupsRefri.length > 0 ? { color: "#d97706" } : {}) }}
-        >
-          ❄ Sin merch REFRI
-          {pendingGroupsRefri.length > 0 && (
-            <span style={{ ...QS.tabBadge, background: "#fef3c7", color: "#d97706" }}>{pendingMerchRefri.length}</span>
           )}
         </button>
         <button
@@ -953,10 +945,15 @@ const ManualField = ({ label, value, onChange, placeholder, mono }) => (
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
+      className="manual-carga-input"
       style={{ ...MANUAL_FIELD_STYLE, ...(mono ? { fontFamily: "ui-monospace, monospace" } : {}) }}
     />
   </div>
 );
+
+const MANUAL_PLACEHOLDER_CSS = `
+  .manual-carga-input::placeholder { color: #c7bfb8; font-style: italic; }
+`;
 
 const ManualCargaModal = ({ form, onChange, onSave, onClose }) => {
   const set = (k, v) => onChange({ ...form, [k]: v });
@@ -965,6 +962,7 @@ const ManualCargaModal = ({ form, onChange, onSave, onClose }) => {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <style>{MANUAL_PLACEHOLDER_CSS}</style>
       <div style={{ background: "#fff", borderRadius: 12, width: 460, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.25)", overflow: "hidden" }}>
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: "1px solid #e7e5e4" }}>
@@ -1412,21 +1410,71 @@ const LoaderCard = ({ loader, current, onEdit, onRemove }) => (
   </div>
 );
 
-const DoneCard = ({ item, loader }) => (
-  <div style={QS.doneCard}>
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-      <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: "#1c1917", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.destino}</span>
-        <span style={{ fontSize: 10, color: "#a8a29e", fontFamily: "ui-monospace, monospace" }}>
-          {item.id} · {loader?.id || "?"} · M{(item.muelle || "—").padStart(2, "0")}
-        </span>
+const DoneCard = ({ item, loader }) => {
+  const [expanded, setExpanded] = React.useState(false);
+  const hasDetails = item.load_start_at || item.load_end_at || (item.checklist && Object.keys(item.checklist).length > 0) || (item.photos && item.photos.length > 0);
+  const [lightboxSrc, setLightboxSrc] = React.useState(null);
+  return (
+    <div style={QS.doneCard}>
+      {lightboxSrc && (
+        <div onClick={() => setLightboxSrc(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", cursor: "zoom-out" }}>
+          <img src={lightboxSrc} alt="foto" style={{ maxWidth: "90vw", maxHeight: "90vh", borderRadius: 8, boxShadow: "0 0 40px rgba(0,0,0,0.5)" }} />
+        </div>
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+        <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#1c1917", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.destino}</span>
+          <span style={{ fontSize: 10, color: "#a8a29e", fontFamily: "ui-monospace, monospace" }}>
+            {item.id} · {loader?.id || "?"} · M{(item.muelle || "—").padStart(2, "0")}
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          <span style={{ fontSize: 10, color: "#15803d", fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", whiteSpace: "nowrap" }}>
+            ✓ {item.completed_at || fmtT(item.finished_at)}
+          </span>
+          {hasDetails && (
+            <button onClick={() => setExpanded(v => !v)} style={{ background: "transparent", border: "1px solid #e7e5e4", borderRadius: 5, fontSize: 10, color: "#78716c", cursor: "pointer", padding: "2px 7px", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+              {expanded ? "▲" : "▼ ver"}
+            </button>
+          )}
+        </div>
       </div>
-      <span style={{ fontSize: 10, color: "#15803d", fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", whiteSpace: "nowrap" }}>
-        ✓ {item.completed_at || fmtT(item.finished_at)}
-      </span>
+      {expanded && (
+        <div style={{ marginTop: 10, borderTop: "1px solid #f4f4f3", paddingTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+          {(item.load_start_at || item.load_end_at) && (
+            <div style={{ display: "flex", gap: 6 }}>
+              {item.load_start_at && <span style={{ fontSize: 10, background: "#dcfce7", color: "#166534", padding: "2px 8px", borderRadius: 4, fontFamily: "ui-monospace, monospace" }}>▶ {fmtT(item.load_start_at)}</span>}
+              {item.load_end_at && <span style={{ fontSize: 10, background: "#dcfce7", color: "#166534", padding: "2px 8px", borderRadius: 4, fontFamily: "ui-monospace, monospace" }}>■ {fmtT(item.load_end_at)}</span>}
+            </div>
+          )}
+          {item.photos && item.photos.length > 0 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {item.photos.map((src, i) => (
+                <img key={i} src={src} alt={`foto-${i+1}`}
+                  style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 6, border: "1px solid #e7e5e4", cursor: "zoom-in" }}
+                  onClick={() => setLightboxSrc(src)} />
+              ))}
+            </div>
+          )}
+          {item.checklist && Object.keys(item.checklist).length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {CHECKLIST_LABELS.map(({ key, label }) => {
+                const val = item.checklist[key];
+                if (val === undefined || val === null) return null;
+                return (
+                  <div key={key} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#57534e", padding: "1px 0" }}>
+                    <span>{label}</span>
+                    <span style={{ fontWeight: 700, color: val === true ? "#15803d" : "#dc2626" }}>{val === true ? "SÍ" : "NO"}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
-  </div>
-);
+  );
+};
 
 const Meta = ({ label, value }) => (
   <div style={QS.meta}>

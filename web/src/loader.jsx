@@ -484,36 +484,38 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
           </div>
         )}
 
-        {/* ─── Trazabilidad: inicio / fin carga ─── */}
-        <div style={LS.timeCard}>
-          <div style={LS.timeCardLabel}>TRAZABILIDAD DE CARGA</div>
-          <div style={LS.timeRow}>
-            <button
-              onClick={onSetLoadStart}
-              disabled={!!item.load_start_at}
-              style={{
-                ...LS.timeBtn,
-                background: item.load_start_at ? "#dcfce7" : "#dc2626",
-                color: item.load_start_at ? "#166534" : "#fff",
-                cursor: item.load_start_at ? "default" : "pointer",
-              }}
-            >
-              {item.load_start_at ? `✓ ${fmtTime(item.load_start_at)}` : "▶ INICIO CARGA"}
-            </button>
-            <button
-              onClick={onSetLoadEnd}
-              disabled={!item.load_start_at || !!item.load_end_at}
-              style={{
-                ...LS.timeBtn,
-                background: item.load_end_at ? "#dcfce7" : (!item.load_start_at ? "#e7e5e4" : "#1d4ed8"),
-                color: item.load_end_at ? "#166534" : (!item.load_start_at ? "#a8a29e" : "#fff"),
-                cursor: (!item.load_start_at || item.load_end_at) ? "default" : "pointer",
-              }}
-            >
-              {item.load_end_at ? `✓ ${fmtTime(item.load_end_at)}` : "■ FIN CARGA"}
-            </button>
+        {/* ─── Trazabilidad: inicio / fin carga (solo cargas manuales) ─── */}
+        {item.source === "manual" && !item.is_combined && (
+          <div style={LS.timeCard}>
+            <div style={LS.timeCardLabel}>TRAZABILIDAD DE CARGA</div>
+            <div style={LS.timeRow}>
+              <button
+                onClick={onSetLoadStart}
+                disabled={!!item.load_start_at}
+                style={{
+                  ...LS.timeBtn,
+                  background: item.load_start_at ? "#dcfce7" : "#dc2626",
+                  color: item.load_start_at ? "#166534" : "#fff",
+                  cursor: item.load_start_at ? "default" : "pointer",
+                }}
+              >
+                {item.load_start_at ? `✓ ${fmtTime(item.load_start_at)}` : "▶ INICIO CARGA"}
+              </button>
+              <button
+                onClick={onSetLoadEnd}
+                disabled={!item.load_start_at || !!item.load_end_at}
+                style={{
+                  ...LS.timeBtn,
+                  background: item.load_end_at ? "#dcfce7" : (!item.load_start_at ? "#e7e5e4" : "#1d4ed8"),
+                  color: item.load_end_at ? "#166534" : (!item.load_start_at ? "#a8a29e" : "#fff"),
+                  cursor: (!item.load_start_at || item.load_end_at) ? "default" : "pointer",
+                }}
+              >
+                {item.load_end_at ? `✓ ${fmtTime(item.load_end_at)}` : "■ FIN CARGA"}
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* ─── Precintos ─── */}
         <div style={LS.precSec}>
