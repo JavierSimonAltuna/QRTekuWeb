@@ -582,9 +582,18 @@ class Api:
         """Añadir manualmente a la cola desde el botón del supervisor."""
         try:
             row = dict(row or {})
-            # Si la fila aún no pasó por el enriquecido del Excel (no aculada),
-            # los pales disponibles (numsup_count/combined_count) pueden faltar.
-            # Los consultamos aquí para que la tarjeta de cola los muestre.
+            # CIF/agencia por matrícula si el supervisor no los rellenó
+            if not row.get("cif"):
+                tractora = (row.get("tractora") or row.get("matriculas", "").split("/")[0]).strip()
+                if tractora:
+                    try:
+                        cif, agencia = core.odbc_lookup_chf(tractora)
+                        row["cif"] = cif or ""
+                        if not row.get("agencia"):
+                            row["agencia"] = agencia or ""
+                    except Exception:
+                        pass
+            # Pales disponibles
             if row.get("numsup_count") is None and row.get("cod_centro"):
                 try:
                     tipo_viaje = row.get("tipo_viaje", "ambiente")
