@@ -45,6 +45,7 @@ const LoaderApp = () => {
   const [refreshingPrec, setRefreshingPrec] = useState(false);
   const [toast, setToast] = useState(null);
   const [pendingChecklist, setPendingChecklist] = useState(null);
+  const [pendingPhotos, setPendingPhotos] = useState([]);
 
   const showToast = (text) => {
     setToast(text);
@@ -126,15 +127,15 @@ const LoaderApp = () => {
     setRefreshingPrec(false);
   };
 
-  const handleFinalize = (checklist) => { setPendingChecklist(checklist || null); setScreen("confirming"); };
-  const handleCancelConfirm = () => { setPendingChecklist(null); setScreen("assigned"); };
+  const handleFinalize = (checklist, photos) => { setPendingChecklist(checklist || null); setPendingPhotos(photos || []); setScreen("confirming"); };
+  const handleCancelConfirm = () => { setPendingChecklist(null); setPendingPhotos([]); setScreen("assigned"); };
 
   const handleConfirmFinish = async () => {
     if (!loader || !item) return;
     setCompletedInfo({ muelle: item.muelle, time: new Date().toLocaleTimeString("es-ES", { hour12: false }) });
     setScreen("completing");
     try {
-      const r = await window.api.call("loader_finish", loader.id, item.id, pendingChecklist || null);
+      const r = await window.api.call("loader_finish", loader.id, item.id, pendingChecklist || null, pendingPhotos.length ? pendingPhotos : null);
       if (r.ok) {
         // Pequeña pausa para mostrar la animación, luego asignar siguiente
         setTimeout(() => {
@@ -336,9 +337,34 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
   const tipoRefr = item.tipo_carga === "REFRIGERADO";
   const [checklist, setChecklist] = useState({});
   const toggleCheck = (key, val) => setChecklist(prev => ({ ...prev, [key]: val }));
+  const [photos, setPhotos] = useState([]);
+  const fileInputRef = useRef(null);
   // Mostrar playa por precinto si los precintos tienen playas distintas entre sí
   const distinctPlayas = new Set((item.precintos || []).map(p => p.playa).filter(Boolean));
   const showPlayaPerPrec = distinctPlayas.size > 1;
+
+  const handlePhotoCapture = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    e.target.value = "";
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 800;
+        let w = img.width, h = img.height;
+        if (w > h && w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+        else if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        const b64 = canvas.toDataURL("image/jpeg", 0.72);
+        setPhotos(prev => prev.length < 3 ? [...prev, b64] : prev);
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
   return (
     <div style={LS.assignRoot}>
       {/* ─── Top bar ─── */}
@@ -517,6 +543,42 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
           </div>
         </div>
 
+        {/* ─── Fotos (opcional, hasta 3) ─── */}
+        <div style={LS.photoCard}>
+          <div style={LS.photoCardHead}>
+            <span style={LS.photoCardTitle}>FOTOS</span>
+            <span style={LS.photoCardHint}>{photos.length}/3</span>
+          </div>
+          <div style={LS.photoRow}>
+            {photos.map((src, i) => (
+              <div key={i} style={LS.photoThumbWrap}>
+                <img src={src} alt={`foto-${i+1}`} style={LS.photoThumb} />
+                <button
+                  onClick={() => setPhotos(prev => prev.filter((_, j) => j !== i))}
+                  style={LS.photoDeleteBtn}
+                >✕</button>
+              </div>
+            ))}
+            {photos.length < 3 && (
+              <button onClick={() => fileInputRef.current && fileInputRef.current.click()} style={LS.photoCamBtn}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                  <circle cx="12" cy="13" r="4"/>
+                </svg>
+                <span style={{ fontSize: 10, marginTop: 3 }}>FOTO</span>
+              </button>
+            )}
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            style={{ display: "none" }}
+            onChange={handlePhotoCapture}
+          />
+        </div>
+
         {/* ─── Checklist inspección (solo cargas manuales) ─── */}
         {item.source === "manual" && (
           <div style={LS.checklistCard}>
@@ -557,7 +619,7 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
 
       {/* ─── Botón finalizar (fijo) — requiere inicio de carga ─── */}
       <button
-        onClick={() => onFinalize(checklist)}
+        onClick={() => onFinalize(checklist, photos)}
         disabled={!item.load_start_at}
         style={{
           ...LS.finalizeBtn,
@@ -863,6 +925,17 @@ const LS = {
   qrFoot: { display: "flex", justifyContent: "space-between", paddingTop: 10, borderTop: "1px solid #f4f4f3", fontSize: 10, color: "#78716c", fontFamily: "ui-monospace, monospace" },
   qrFootL: { letterSpacing: 0.2 },
   qrFootR: { letterSpacing: 0.2 },
+
+  // ── Fotos ─────────────────────────────────────
+  photoCard: { background: "#fff", borderRadius: 14, padding: "14px 16px", marginTop: 10, border: "1px solid #e7e5e4" },
+  photoCardHead: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+  photoCardTitle: { fontSize: 9.5, fontWeight: 700, letterSpacing: 1.2, color: "#a8a29e", textTransform: "uppercase" },
+  photoCardHint: { fontSize: 10, color: "#a8a29e" },
+  photoRow: { display: "flex", gap: 8, flexWrap: "wrap" },
+  photoThumbWrap: { position: "relative", width: 80, height: 80 },
+  photoThumb: { width: 80, height: 80, objectFit: "cover", borderRadius: 8, border: "1px solid #e7e5e4" },
+  photoDeleteBtn: { position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%", background: "#dc2626", color: "#fff", border: "none", fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1, padding: 0 },
+  photoCamBtn: { width: 80, height: 80, borderRadius: 8, border: "2px dashed #d6d3d1", background: "#fafaf9", color: "#a8a29e", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", cursor: "pointer", fontFamily: "inherit", gap: 2 },
 
   // ── Checklist ──────────────────────────────────
   checklistCard: { background: "#fff", borderRadius: 14, padding: "14px 16px", marginTop: 10, border: "1px solid #e7e5e4" },

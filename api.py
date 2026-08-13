@@ -808,11 +808,11 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e), "trace": traceback.format_exc()}
 
-    def loader_finish(self, loader_id: str, item_id: str, checklist: dict = None) -> dict:
+    def loader_finish(self, loader_id: str, item_id: str, checklist: dict = None, photos: list = None) -> dict:
         """Marca como completada y asigna automáticamente la siguiente."""
         try:
             mgr = queue_manager.get_manager()
-            res = mgr.finish(item_id, loader_id, checklist=checklist)
+            res = mgr.finish(item_id, loader_id, checklist=checklist, photos=photos)
             if not res.get("ok"):
                 return res
             next_item = mgr.pick_next_for(loader_id)

@@ -414,7 +414,7 @@ class QueueManager:
             "gallego_urgente": bool(row.get("gallego_urgente", False)),
             "touliv1": row.get("touliv1"), "ruta_carga": row.get("ruta_carga"),
             "comment": "", "blocked": False, "helper_id": None,
-            "load_start_at": None, "load_end_at": None, "checklist": None,
+            "load_start_at": None, "load_end_at": None, "checklist": None, "photos": [],
         }
 
     @staticmethod
@@ -495,8 +495,8 @@ class QueueManager:
                     return it
             return None
 
-    def finish(self, item_id: str, loader_id: str, checklist: Optional[dict] = None) -> dict:
-        """Marca como completada. Guarda checklist de inspección si se proporciona."""
+    def finish(self, item_id: str, loader_id: str, checklist: Optional[dict] = None, photos: Optional[list] = None) -> dict:
+        """Marca como completada. Guarda checklist e fotos si se proporcionan."""
         with self._lock:
             for i, it in enumerate(self._items):
                 if it["id"] == item_id and (
@@ -508,6 +508,8 @@ class QueueManager:
                     it["completed_at"]     = datetime.now().strftime("%H:%M:%S")
                     if checklist:
                         it["checklist"] = checklist
+                    if photos:
+                        it["photos"] = photos
                     loader = self._get_loader(loader_id)
                     if loader:
                         loader["muelle_actual"] = it["muelle"]
