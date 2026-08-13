@@ -158,7 +158,7 @@ class QueueManager:
                 except Exception:
                     pass
 
-            # Loaders
+            # Loaders — cargar desde DB
             rows = conn.execute("SELECT data FROM loaders").fetchall()
             self._loaders = []
             for r in rows:
@@ -166,27 +166,41 @@ class QueueManager:
                     self._loaders.append(json.loads(r[0]))
                 except Exception:
                     pass
-            if not self._loaders:
-                # Intentar migrar desde JSON legacy antes de usar defaults
-                legacy_imported = False
-                if LOADERS_FILE.exists():
-                    try:
-                        legacy = json.loads(LOADERS_FILE.read_text(encoding="utf-8"))
-                        if legacy:
-                            self._loaders = legacy
-                            for l in self._loaders:
+
+            # Sincronizar siempre desde bleecker_loaders.json si existe
+            # (upsert: añade nuevos cargadores y actualiza los existentes)
+            if LOADERS_FILE.exists():
+                try:
+                    legacy = json.loads(LOADERS_FILE.read_text(encoding="utf-8"))
+                    if isinstance(legacy, list):
+                        existing_ids = {l["id"] for l in self._loaders}
+                        for l in legacy:
+                            if not isinstance(l, dict) or not l.get("id"):
+                                continue
+                            if l["id"] in existing_ids:
+                                for existing in self._loaders:
+                                    if existing["id"] == l["id"]:
+                                        existing.update({k: v for k, v in l.items() if k != "muelle_actual"})
+                                        conn.execute("INSERT OR REPLACE INTO loaders VALUES (?,?)",
+                                                     (existing["id"], json.dumps(existing, ensure_ascii=False)))
+                                        break
+                            else:
+                                new_l = {**l, "active": True}
+                                self._loaders.append(new_l)
+                                existing_ids.add(new_l["id"])
                                 conn.execute("INSERT OR REPLACE INTO loaders VALUES (?,?)",
-                                             (l["id"], json.dumps(l, ensure_ascii=False)))
-                            conn.commit()
-                            legacy_imported = True
-                    except Exception:
-                        pass
-                if not legacy_imported:
-                    self._loaders = list(DEFAULT_LOADERS)
-                    for l in self._loaders:
-                        conn.execute("INSERT OR REPLACE INTO loaders VALUES (?,?)",
-                                     (l["id"], json.dumps(l, ensure_ascii=False)))
-                    conn.commit()
+                                             (new_l["id"], json.dumps(new_l, ensure_ascii=False)))
+                        conn.commit()
+                except Exception:
+                    pass
+
+            # Si todavía no hay cargadores, insertar los demo por defecto
+            if not self._loaders:
+                self._loaders = list(DEFAULT_LOADERS)
+                for l in self._loaders:
+                    conn.execute("INSERT OR REPLACE INTO loaders VALUES (?,?)",
+                                 (l["id"], json.dumps(l, ensure_ascii=False)))
+                conn.commit()
 
         # Migrar desde JSON legacy si la DB estaba vacía
         if not self._items and self._counter == 0 and QUEUE_FILE.exists():
