@@ -24,6 +24,22 @@ import queue_manager
 from app_logger import log, log_exc, get_log_lines, LOG_FILE
 
 
+def _import_graph_excel():
+    """Carga graph_excel desde SAVE_DIR (junto a graph_config.json), no desde el dir del exe."""
+    import importlib.util
+    candidates = [
+        core.SAVE_DIR / "graph_excel.py",
+        Path(__file__).resolve().parent / "graph_excel.py",
+    ]
+    for path in candidates:
+        if path.exists():
+            spec = importlib.util.spec_from_file_location("graph_excel", path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+    raise ImportError(f"graph_excel.py no encontrado. Cópialo a: {core.SAVE_DIR}")
+
+
 class Api:
     """Métodos expuestos al frontend."""
 
@@ -309,7 +325,7 @@ class Api:
         # Solo si hay un archivo SP activo (seleccionado por el usuario via graph_load_file)
         if self._graph_server_url:
             try:
-                import graph_excel as _ge
+                _ge = _import_graph_excel()
                 gr = _ge.get_reader()
                 if gr.is_configured():
                     import tempfile as _tmp, os as _os2
@@ -365,7 +381,7 @@ class Api:
     # ──────────────────────────────────────────────────────────────
     def graph_get_config(self) -> dict:
         try:
-            import graph_excel as _ge
+            _ge = _import_graph_excel()
             r = _ge.get_reader()
             return {
                 "ok": True,
@@ -378,7 +394,7 @@ class Api:
 
     def graph_save_config(self, cfg: dict) -> dict:
         try:
-            import graph_excel as _ge
+            _ge = _import_graph_excel()
             r = _ge.get_reader()
             r.save_config(cfg)
             self._graph_server_url = ""  # resetear al cambiar config
@@ -390,7 +406,7 @@ class Api:
     def graph_test(self) -> dict:
         """Prueba autenticación + lista los archivos de la carpeta."""
         try:
-            import graph_excel as _ge
+            _ge = _import_graph_excel()
             r = _ge.get_reader()
             if not r.is_configured():
                 return {"ok": False, "error": "No configurado o desactivado"}
@@ -403,7 +419,7 @@ class Api:
     def graph_list_files(self) -> dict:
         """Lista los .xlsx de la carpeta SharePoint configurada."""
         try:
-            import graph_excel as _ge
+            _ge = _import_graph_excel()
             r = _ge.get_reader()
             if not r.is_configured():
                 return {"ok": False, "error": "No configurado"}
@@ -415,7 +431,8 @@ class Api:
     def graph_load_file(self, server_url: str) -> dict:
         """Descarga y carga un Excel de SharePoint por su ServerRelativeUrl."""
         try:
-            import graph_excel as _ge, tempfile as _tmp, os as _os2
+            import tempfile as _tmp, os as _os2
+            _ge = _import_graph_excel()
             r = _ge.get_reader()
             if not r.is_configured():
                 return {"ok": False, "error": "No configurado"}
