@@ -336,6 +336,9 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
   const tipoRefr = item.tipo_carga === "REFRIGERADO";
   const [checklist, setChecklist] = useState({});
   const toggleCheck = (key, val) => setChecklist(prev => ({ ...prev, [key]: val }));
+  // Mostrar playa por precinto si los precintos tienen playas distintas entre sí
+  const distinctPlayas = new Set((item.precintos || []).map(p => p.playa).filter(Boolean));
+  const showPlayaPerPrec = distinctPlayas.size > 1;
   return (
     <div style={LS.assignRoot}>
       {/* ─── Top bar ─── */}
@@ -507,7 +510,7 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
                 total={item.precintos.length}
                 centro={p.centro || item.destino}
                 code={p.precinto}
-                playa={item.is_combined ? (p.playa || null) : null}
+                playa={showPlayaPerPrec ? (p.playa || null) : null}
               />
             ))}
             {(item.precintos || []).length === 0 && (
@@ -810,7 +813,7 @@ const LS = {
   muelleMetaRow: { display: "flex", flexDirection: "column", alignItems: "flex-end", lineHeight: 1.1 },
   muelleMetaLabel: { fontSize: 9, fontWeight: 700, letterSpacing: 1.5, color: "rgba(255,255,255,0.45)" },
   muelleMetaValue: { fontSize: 17, fontWeight: 700, letterSpacing: -0.4, fontFamily: "ui-monospace, monospace" },
-  muelleFoot: { marginTop: 10, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.08)", fontSize: 10.5, color: "rgba(255,255,255,0.7)", display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center", fontFamily: "ui-monospace, monospace" },
+  muelleFoot: { marginTop: 10, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.08)", fontSize: 10.5, color: "rgba(255,255,255,0.7)", display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center", justifyContent: "center", fontFamily: "ui-monospace, monospace" },
   muelleFootKey: { color: "rgba(255,255,255,0.4)", letterSpacing: 0.5 },
   muelleFootVal: { color: "#fafaf9", fontWeight: 600 },
   muelleFootSep: { color: "rgba(255,255,255,0.25)", margin: "0 2px" },
