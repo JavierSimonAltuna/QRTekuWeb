@@ -507,25 +507,29 @@ def load_excel(path: str) -> tuple[list[dict], str]:
                     if cod_centro:
                         break
 
-        # Recoger todos los precintos con el mismo Nº viaje (cada uno con su centro)
+        # Recoger todos los precintos con el mismo Nº viaje (cada uno con su centro y playa)
         precintos_data = []
         if precinto_col is not None and n_col and n:
             target = _norm_n(n)
             try:
                 matching = df[df[n_col].apply(_norm_n) == target]
                 seen = set()
+                _pcol = next((c for c in df.columns
+                              if str(c).upper().replace("\n","").replace(" ","").replace("\t","") == "PLAYA"), None)
                 for _, mrow in matching.iterrows():
                     pv = _safe_str(mrow.get(precinto_col, ""))
                     if pv and pv not in seen:
                         seen.add(pv)
                         centro_v = _safe_str(mrow.get("DESTINO", ""))
-                        precintos_data.append({"centro": centro_v, "precinto": pv})
+                        playa_v = (_safe_str(mrow.get(_pcol, "")) if _pcol
+                                   else (_safe_str(mrow.iloc[10]) if len(df.columns) > 10 else ""))
+                        precintos_data.append({"centro": centro_v, "precinto": pv, "playa": playa_v})
             except Exception:
                 pass
         if not precintos_data and precinto_col is not None:
             only = _safe_str(r.get(precinto_col, ""))
             if only:
-                precintos_data = [{"centro": destino, "precinto": only}]
+                precintos_data = [{"centro": destino, "precinto": only, "playa": playa}]
 
         # Viaje combinado (precintos con distintos centros) → invertir el orden,
         # porque el orden de carga es inverso al orden de descarga del Excel.
