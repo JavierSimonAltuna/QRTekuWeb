@@ -19,7 +19,6 @@ from __future__ import annotations
 import base64
 import json
 import sqlite3
-import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -29,9 +28,8 @@ import qr_teku_core as core
 
 
 # ─── Ubicación de la persistencia ──────────────────────────────
-# La DB vive junto al ejecutable/script (directorio activo de la app).
-_APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
-DB_FILE      = _APP_DIR / "bleecker_queue.db"
+# La DB vive en SAVE_DIR (QR_WORDS), junto al resto de archivos de datos.
+DB_FILE      = core.SAVE_DIR / "bleecker_queue.db"
 QUEUE_FILE   = core.SAVE_DIR / "bleecker_queue.json"    # legacy (migración)
 LOADERS_FILE = core.SAVE_DIR / "bleecker_loaders.json"  # legacy (migración)
 

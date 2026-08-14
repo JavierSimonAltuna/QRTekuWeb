@@ -24,20 +24,109 @@ import queue_manager
 from app_logger import log, log_exc, get_log_lines, LOG_FILE
 
 
-def _import_graph_excel():
-    """Carga graph_excel desde SAVE_DIR (junto a graph_config.json), no desde el dir del exe."""
-    import importlib.util
-    candidates = [
-        core.SAVE_DIR / "graph_excel.py",
-        Path(__file__).resolve().parent / "graph_excel.py",
-    ]
-    for path in candidates:
-        if path.exists():
-            spec = importlib.util.spec_from_file_location("graph_excel", path)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            return mod
-    raise ImportError(f"graph_excel.py no encontrado. Cópialo a: {core.SAVE_DIR}")
+class _GraphReader:
+    """Cliente Microsoft Graph API para SharePoint — sin dependencias externas."""
+
+    def __init__(self):
+        self._cfg = self._load_config()
+
+    @staticmethod
+    def _load_config() -> dict:
+        try:
+            f = core.SAVE_DIR / "graph_config.json"
+            if f.exists():
+                return json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        return {}
+
+    def get_config_safe(self) -> dict:
+        c = dict(self._cfg)
+        if c.get("client_secret"):
+            c["client_secret"] = "•" * 36
+        return c
+
+    def is_configured(self) -> bool:
+        return bool(
+            self._cfg.get("enabled") and
+            self._cfg.get("tenant_id") and
+            self._cfg.get("client_id") and
+            self._cfg.get("client_secret")
+        )
+
+    def save_config(self, cfg: dict):
+        current = self._load_config()
+        merged = {**current, **cfg}
+        if (cfg.get("client_secret") or "").startswith("•") and current.get("client_secret"):
+            merged["client_secret"] = current["client_secret"]
+        core.SAVE_DIR.mkdir(parents=True, exist_ok=True)
+        (core.SAVE_DIR / "graph_config.json").write_text(
+            json.dumps(merged, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        self._cfg = merged
+
+    def _token(self) -> str:
+        import msal
+        app = msal.ConfidentialClientApplication(
+            self._cfg["client_id"],
+            authority=f"https://login.microsoftonline.com/{self._cfg['tenant_id']}",
+            client_credential=self._cfg["client_secret"],
+        )
+        res = app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
+        if "access_token" not in res:
+            raise RuntimeError(res.get("error_description") or res.get("error") or "Auth error")
+        return res["access_token"]
+
+    def _get(self, path: str) -> dict:
+        import requests as _req
+        r = _req.get(
+            f"https://graph.microsoft.com/v1.0{path}",
+            headers={"Authorization": f"Bearer {self._token()}"},
+            timeout=30,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def _site_id(self) -> str:
+        sp = (self._cfg.get("sharepoint_url") or "").rstrip("/")
+        host = sp.split("//", 1)[-1].split("/")[0]
+        sp_path = (self._cfg.get("site_path") or "").strip("/")
+        endpoint = f"/sites/{host}:/{sp_path}" if sp_path else f"/sites/{host}"
+        return self._get(endpoint)["id"]
+
+    def list_folder_files(self) -> list:
+        site = self._site_id()
+        folder = (self._cfg.get("folder_path") or "").strip("/")
+        if folder:
+            data = self._get(f"/sites/{site}/drive/root:/{folder}:/children")
+        else:
+            data = self._get(f"/sites/{site}/drive/root/children")
+        out = []
+        for item in data.get("value", []):
+            if not item.get("name", "").lower().endswith(".xlsx"):
+                continue
+            out.append({
+                "name":       item["name"],
+                "server_url": item.get("webUrl", item["id"]),
+                "modified":   item.get("lastModifiedDateTime", ""),
+                "size_kb":    round((item.get("size") or 0) / 1024),
+            })
+        return out
+
+    def download_bytes(self, server_url: str):
+        import requests as _req
+        filename = server_url.rsplit("/", 1)[-1]
+        folder = (self._cfg.get("folder_path") or "").strip("/")
+        item_path = f"{folder}/{filename}" if folder else filename
+        site = self._site_id()
+        r = _req.get(
+            f"https://graph.microsoft.com/v1.0/sites/{site}/drive/root:/{item_path}:/content",
+            headers={"Authorization": f"Bearer {self._token()}"},
+            timeout=60,
+            allow_redirects=True,
+        )
+        r.raise_for_status()
+        return r.content, filename
 
 
 class Api:
@@ -325,8 +414,7 @@ class Api:
         # Solo si hay un archivo SP activo (seleccionado por el usuario via graph_load_file)
         if self._graph_server_url:
             try:
-                _ge = _import_graph_excel()
-                gr = _ge.get_reader()
+                gr = _GraphReader()
                 if gr.is_configured():
                     import tempfile as _tmp, os as _os2
                     content, filename = gr.download_bytes(self._graph_server_url)
@@ -381,8 +469,7 @@ class Api:
     # ──────────────────────────────────────────────────────────────
     def graph_get_config(self) -> dict:
         try:
-            _ge = _import_graph_excel()
-            r = _ge.get_reader()
+            r = _GraphReader()
             return {
                 "ok": True,
                 "config": r.get_config_safe(),
@@ -394,8 +481,7 @@ class Api:
 
     def graph_save_config(self, cfg: dict) -> dict:
         try:
-            _ge = _import_graph_excel()
-            r = _ge.get_reader()
+            r = _GraphReader()
             r.save_config(cfg)
             self._graph_server_url = ""  # resetear al cambiar config
             log("INFO", "graph_config_saved", enabled=cfg.get("enabled"))
@@ -406,8 +492,7 @@ class Api:
     def graph_test(self) -> dict:
         """Prueba autenticación + lista los archivos de la carpeta."""
         try:
-            _ge = _import_graph_excel()
-            r = _ge.get_reader()
+            r = _GraphReader()
             if not r.is_configured():
                 return {"ok": False, "error": "No configurado o desactivado"}
             files = r.list_folder_files()
@@ -419,8 +504,7 @@ class Api:
     def graph_list_files(self) -> dict:
         """Lista los .xlsx de la carpeta SharePoint configurada."""
         try:
-            _ge = _import_graph_excel()
-            r = _ge.get_reader()
+            r = _GraphReader()
             if not r.is_configured():
                 return {"ok": False, "error": "No configurado"}
             files = r.list_folder_files()
@@ -432,8 +516,7 @@ class Api:
         """Descarga y carga un Excel de SharePoint por su ServerRelativeUrl."""
         try:
             import tempfile as _tmp, os as _os2
-            _ge = _import_graph_excel()
-            r = _ge.get_reader()
+            r = _GraphReader()
             if not r.is_configured():
                 return {"ok": False, "error": "No configurado"}
             content, filename = r.download_bytes(server_url)
