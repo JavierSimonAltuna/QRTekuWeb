@@ -339,13 +339,13 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
   const toggleCheck = (key, val) => setChecklist(prev => ({ ...prev, [key]: val }));
   const [photos, setPhotos] = useState([]);
   const fileInputRef = useRef(null);
-  // Mostrar playa por precinto si los precintos tienen playas distintas entre sí
-  const distinctPlayas = new Set((item.precintos || []).map(p => p.playa).filter(Boolean));
-  const showPlayaPerPrec = distinctPlayas.size > 1;
+  const distinctPlayas  = new Set((item.precintos || []).map(p => p.playa).filter(Boolean));
   const distinctDestinos = new Set((item.precintos || []).map(p => p.centro).filter(Boolean));
   const isCombinedTrip = item.is_combined ||
     (item.trip_destinos && item.trip_destinos.length > 1) ||
     distinctDestinos.size > 1;
+  // Mostrar playa por precinto si las playas son distintas O si es viaje combinado con alguna playa
+  const showPlayaPerPrec = distinctPlayas.size > 1 || (isCombinedTrip && distinctPlayas.size > 0);
 
   const handlePhotoCapture = (e) => {
     const file = e.target.files && e.target.files[0];
@@ -401,13 +401,16 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
               {tipoRefr ? "❄ REFR" : `P-${item.playa ? Math.ceil((parseInt(item.playa, 10) || 0) / 100) || 1 : 1}`}
             </span>
           </div>
-          {item.is_combined && item.trip_destinos && item.trip_destinos.length > 1 && (
+          {isCombinedTrip && (
             <div style={{
               fontSize: 10.5, fontWeight: 700, color: "#6d28d9",
               background: "#f5f3ff", borderRadius: 6, padding: "6px 10px",
               letterSpacing: 0.5, marginBottom: 6,
             }}>
-              VIAJE COMBINADO: {item.trip_destinos.join(" → ")}
+              VIAJE COMBINADO:{" "}
+              {(item.trip_destinos && item.trip_destinos.length > 1)
+                ? item.trip_destinos.join(" → ")
+                : [...distinctDestinos].join(" → ")}
             </div>
           )}
           <div style={LS.muelleRow}>
