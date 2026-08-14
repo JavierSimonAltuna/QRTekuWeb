@@ -105,23 +105,32 @@ class _GraphReader:
         for item in data.get("value", []):
             if not item.get("name", "").lower().endswith(".xlsx"):
                 continue
+            # server_url = item ID de Graph (único, estable, descargable directamente)
             out.append({
                 "name":       item["name"],
-                "server_url": item.get("webUrl", item["id"]),
+                "server_url": item["id"],
                 "modified":   item.get("lastModifiedDateTime", ""),
                 "size_kb":    round((item.get("size") or 0) / 1024),
             })
         return out
 
-    def download_bytes(self, server_url: str):
+    def download_bytes(self, item_id: str):
+        """Descarga un archivo de SharePoint por su Graph item ID."""
         import requests as _req
-        filename = server_url.rsplit("/", 1)[-1]
-        folder = (self._cfg.get("folder_path") or "").strip("/")
-        item_path = f"{folder}/{filename}" if folder else filename
         site = self._site_id()
+        tok = self._token()
+        # Obtener nombre del archivo
+        meta = _req.get(
+            f"https://graph.microsoft.com/v1.0/sites/{site}/drive/items/{item_id}",
+            headers={"Authorization": f"Bearer {tok}"},
+            timeout=15,
+        )
+        meta.raise_for_status()
+        filename = meta.json().get("name", "plan_carga.xlsx")
+        # Descargar contenido
         r = _req.get(
-            f"https://graph.microsoft.com/v1.0/sites/{site}/drive/root:/{item_path}:/content",
-            headers={"Authorization": f"Bearer {self._token()}"},
+            f"https://graph.microsoft.com/v1.0/sites/{site}/drive/items/{item_id}/content",
+            headers={"Authorization": f"Bearer {tok}"},
             timeout=60,
             allow_redirects=True,
         )
@@ -144,7 +153,8 @@ class Api:
         self._excel_sessions: list = []  # historial de Excels cargados (máx 3)
         self._ip_lan: str = "127.0.0.1"
         self._port: int = 8765
-        self._graph_server_url: str = ""  # ServerRelativeUrl del archivo SP activo
+        self._graph_server_url: str = ""   # Graph item ID del archivo SP activo
+        self._graph_active_name: str = ""  # nombre del archivo SP activo (para mostrar)
 
     def set_server_info(self, ip_lan: str, port: int):
         self._ip_lan = ip_lan
@@ -474,7 +484,7 @@ class Api:
                 "ok": True,
                 "config": r.get_config_safe(),
                 "configured": r.is_configured(),
-                "active_file": self._graph_server_url.rsplit("/", 1)[-1] if self._graph_server_url else "",
+                "active_file": self._graph_active_name if self._graph_server_url else "",
             }
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -483,7 +493,8 @@ class Api:
         try:
             r = _GraphReader()
             r.save_config(cfg)
-            self._graph_server_url = ""  # resetear al cambiar config
+            self._graph_server_url = ""   # resetear al cambiar config
+            self._graph_active_name = ""
             log("INFO", "graph_config_saved", enabled=cfg.get("enabled"))
             return {"ok": True, "configured": r.is_configured()}
         except Exception as e:
@@ -529,6 +540,7 @@ class Api:
                 self._last_excel_path = saved_path
                 if result.get("ok"):
                     self._graph_server_url = server_url
+                    self._graph_active_name = filename
                     result["filename"] = filename
                     result["source"] = "sharepoint"
                     log("INFO", "graph_load_file", file=filename)
