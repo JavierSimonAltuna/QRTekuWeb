@@ -384,7 +384,8 @@ class QueueManager:
                     return it
             row = dict(row)
             row["mercancia_ok"] = True
-            item = self._build_item(row, urgente=urgente, source="manual")
+            source_val = row.get("source") or "manual"
+            item = self._build_item(row, urgente=urgente, source=source_val)
             self._items.append(item)
             self._persist_item(item)
             self._add_audit("encolada", item_id=item["id"], destino=item.get("destino"),

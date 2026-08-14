@@ -490,6 +490,7 @@ const QRTekuApp = () => {
     // Enriquecer la fila con CIF/agencia editados antes de encolar
     const payload = {
       ...r,
+      source: "excel",
       cif: st?.C || r.cif || "",
       agencia: st?.E || r.agencia || "",
       fecha: st?.D || fileInfo?.fecha || "",

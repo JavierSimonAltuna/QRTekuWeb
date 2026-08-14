@@ -314,6 +314,28 @@ const QueuePanel = ({ pushToast }) => {
             <span style={{ ...QS.tabBadge, background: "#dbeafe", color: "#0c4a6e" }}>{snap.counts.queued_refr}</span>
           )}
         </button>
+        {(snap.counts.pending_merch > 0 || activeTab === "sinmerch") && (
+          <button
+            onClick={() => setActiveTab("sinmerch")}
+            style={{ ...QS.tab, ...(activeTab === "sinmerch" ? { ...QS.tabActive, borderBottomColor: "#f59e0b", color: "#92400e" } : { color: "#b45309" }) }}
+          >
+            ⚠ Sin merch
+            {snap.counts.pending_merch > 0 && (
+              <span style={{ ...QS.tabBadge, background: "#fef3c7", color: "#92400e" }}>{snap.counts.pending_merch}</span>
+            )}
+          </button>
+        )}
+        {(snap.counts.pending_merch_refr > 0 || activeTab === "sinmerch_refri") && (
+          <button
+            onClick={() => setActiveTab("sinmerch_refri")}
+            style={{ ...QS.tab, ...(activeTab === "sinmerch_refri" ? { ...QS.tabActive, borderBottomColor: "#f59e0b", color: "#92400e" } : { color: "#b45309" }) }}
+          >
+            ❄⚠ Sin merch refri
+            {snap.counts.pending_merch_refr > 0 && (
+              <span style={{ ...QS.tabBadge, background: "#fef3c7", color: "#92400e" }}>{snap.counts.pending_merch_refr}</span>
+            )}
+          </button>
+        )}
         <button
           onClick={() => { setActiveTab("actividad"); fetchAuditLog(); }}
           style={{ ...QS.tab, ...(activeTab === "actividad" ? QS.tabActive : {}) }}

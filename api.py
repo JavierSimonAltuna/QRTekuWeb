@@ -939,9 +939,14 @@ class Api:
     def loader_current(self, loader_id: str) -> dict:
         """Carga asignada al cargador (si la hay) sin asignar otra."""
         try:
-            item = queue_manager.get_manager().get_current_for(loader_id)
-            counts = queue_manager.get_manager().snapshot()["counts"]
-            return {"ok": True, "item": item, "queued_count": counts["queued"]}
+            mgr = queue_manager.get_manager()
+            item = mgr.get_current_for(loader_id)
+            snap = mgr.snapshot()
+            counts = snap["counts"]
+            loader = next((l for l in snap["loaders"] if l["id"] == loader_id), None)
+            is_refri = (loader or {}).get("queue_type") == "refrigerado"
+            queued_count = counts["queued_refr"] if is_refri else counts["queued"]
+            return {"ok": True, "item": item, "queued_count": queued_count}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
@@ -964,15 +969,21 @@ class Api:
         try:
             mgr = queue_manager.get_manager()
             current = mgr.get_current_for(loader_id)
+            snap = mgr.snapshot()
+            counts = snap["counts"]
+            loader = next((l for l in snap["loaders"] if l["id"] == loader_id), None)
+            is_refri = (loader or {}).get("queue_type") == "refrigerado"
+            queued_count = counts["queued_refr"] if is_refri else counts["queued"]
             if current:
                 self._refresh_precintos(current)
-                counts = mgr.snapshot()["counts"]
-                return {"ok": True, "item": current, "queued_count": counts["queued"], "already_assigned": True}
+                return {"ok": True, "item": current, "queued_count": queued_count, "already_assigned": True}
             item = mgr.pick_next_for(loader_id)
             if item:
                 self._refresh_precintos(item)
-            counts = mgr.snapshot()["counts"]
-            return {"ok": True, "item": item, "queued_count": counts["queued"]}
+            snap2 = mgr.snapshot()
+            counts2 = snap2["counts"]
+            queued_count2 = counts2["queued_refr"] if is_refri else counts2["queued"]
+            return {"ok": True, "item": item, "queued_count": queued_count2}
         except Exception as e:
             return {"ok": False, "error": str(e), "trace": traceback.format_exc()}
 
@@ -986,12 +997,16 @@ class Api:
             next_item = mgr.pick_next_for(loader_id)
             if next_item:
                 self._refresh_precintos(next_item)
-            counts = mgr.snapshot()["counts"]
+            snap = mgr.snapshot()
+            counts = snap["counts"]
+            loader = next((l for l in snap["loaders"] if l["id"] == loader_id), None)
+            is_refri = (loader or {}).get("queue_type") == "refrigerado"
+            queued_count = counts["queued_refr"] if is_refri else counts["queued"]
             return {
                 "ok": True,
                 "completed": res["completed"],
                 "next": next_item,
-                "queued_count": counts["queued"],
+                "queued_count": queued_count,
             }
         except Exception as e:
             return {"ok": False, "error": str(e), "trace": traceback.format_exc()}
