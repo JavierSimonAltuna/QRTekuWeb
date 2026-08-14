@@ -54,6 +54,7 @@ const QRTekuApp = () => {
   const [showExcelPicker, setShowExcelPicker] = useState(false);
   const [serverInfo, setServerInfo] = useState(null);
   const prevAculadoCountRef = useRef(null); // para detectar nuevos acules en el polling HTTP
+  const audioCtxRef = useRef(null);         // AudioContext persistente (se desbloquea con el primer clic)
   const winW = useWindowWidth();
   const isTablet = winW < 1100;
   // En tablet, controla si mostrar la lista o el detalle
@@ -66,22 +67,52 @@ const QRTekuApp = () => {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200);
   }, []);
 
+  // ── Audio: desbloquear AudioContext en el primer gesto del usuario ──
+  // Los navegadores suspenden el contexto hasta que hay interacción humana.
+  useEffect(() => {
+    const unlock = () => {
+      try {
+        if (!audioCtxRef.current) {
+          audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+        } else if (audioCtxRef.current.state === "suspended") {
+          audioCtxRef.current.resume();
+        }
+      } catch (_) {}
+    };
+    document.addEventListener("click", unlock, { once: true });
+    document.addEventListener("keydown", unlock, { once: true });
+    return () => {
+      document.removeEventListener("click", unlock);
+      document.removeEventListener("keydown", unlock);
+    };
+  }, []);
+
+  const _playBeeps = useCallback((ctx) => {
+    [0, 0.22, 0.44].forEach((delay, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = 660 + i * 220;
+      gain.gain.setValueAtTime(0.4, ctx.currentTime + delay);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.18);
+      osc.start(ctx.currentTime + delay);
+      osc.stop(ctx.currentTime + delay + 0.18);
+    });
+  }, []);
+
   const beepAcule = useCallback(() => {
     try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      // Triple beep ascendente para acule
-      [0, 0.22, 0.44].forEach((delay, i) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain); gain.connect(ctx.destination);
-        osc.frequency.value = 660 + i * 220;
-        gain.gain.setValueAtTime(0.4, ctx.currentTime + delay);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.18);
-        osc.start(ctx.currentTime + delay);
-        osc.stop(ctx.currentTime + delay + 0.18);
-      });
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === "suspended") {
+        ctx.resume().then(() => _playBeeps(ctx)).catch(() => {});
+      } else {
+        _playBeeps(ctx);
+      }
     } catch (_) {}
-  }, []);
+  }, [_playBeeps]);
 
   const notifyAcule = useCallback((count) => {
     beepAcule();
