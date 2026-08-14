@@ -493,8 +493,8 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
           </div>
         )}
 
-        {/* ─── Trazabilidad: inicio / fin carga (solo cargas manuales) ─── */}
-        {item.source === "manual" && !isCombinedTrip && (
+        {/* ─── Trazabilidad: inicio / fin carga ─── */}
+        {!isCombinedTrip && (
           <div style={LS.timeCard}>
             <div style={LS.timeCardLabel}>TRAZABILIDAD DE CARGA</div>
             <div style={LS.timeRow}>

@@ -301,8 +301,8 @@ const QueuePanel = ({ pushToast }) => {
           style={{ ...QS.tab, ...(activeTab === "cola" ? QS.tabActive : {}) }}
         >
           ☼ Cola ambiente
-          {snap.counts.queued > 0 && (
-            <span style={QS.tabBadge}>{snap.counts.queued}</span>
+          {(snap.counts.queued + (snap.counts.pending_merch || 0)) > 0 && (
+            <span style={QS.tabBadge}>{snap.counts.queued + (snap.counts.pending_merch || 0)}</span>
           )}
         </button>
         <button
@@ -310,32 +310,10 @@ const QueuePanel = ({ pushToast }) => {
           style={{ ...QS.tab, ...(activeTab === "cola_refri" ? { ...QS.tabActive, borderBottomColor: "#0ea5e9", color: "#0c4a6e" } : {}) }}
         >
           ❄ Cola refri
-          {(snap.counts.queued_refr || 0) > 0 && (
-            <span style={{ ...QS.tabBadge, background: "#dbeafe", color: "#0c4a6e" }}>{snap.counts.queued_refr}</span>
+          {((snap.counts.queued_refr || 0) + (snap.counts.pending_merch_refr || 0)) > 0 && (
+            <span style={{ ...QS.tabBadge, background: "#dbeafe", color: "#0c4a6e" }}>{(snap.counts.queued_refr || 0) + (snap.counts.pending_merch_refr || 0)}</span>
           )}
         </button>
-        {(snap.counts.pending_merch > 0 || activeTab === "sinmerch") && (
-          <button
-            onClick={() => setActiveTab("sinmerch")}
-            style={{ ...QS.tab, ...(activeTab === "sinmerch" ? { ...QS.tabActive, borderBottomColor: "#f59e0b", color: "#92400e" } : { color: "#b45309" }) }}
-          >
-            ⚠ Sin merch
-            {snap.counts.pending_merch > 0 && (
-              <span style={{ ...QS.tabBadge, background: "#fef3c7", color: "#92400e" }}>{snap.counts.pending_merch}</span>
-            )}
-          </button>
-        )}
-        {(snap.counts.pending_merch_refr > 0 || activeTab === "sinmerch_refri") && (
-          <button
-            onClick={() => setActiveTab("sinmerch_refri")}
-            style={{ ...QS.tab, ...(activeTab === "sinmerch_refri" ? { ...QS.tabActive, borderBottomColor: "#f59e0b", color: "#92400e" } : { color: "#b45309" }) }}
-          >
-            ❄⚠ Sin merch refri
-            {snap.counts.pending_merch_refr > 0 && (
-              <span style={{ ...QS.tabBadge, background: "#fef3c7", color: "#92400e" }}>{snap.counts.pending_merch_refr}</span>
-            )}
-          </button>
-        )}
         <button
           onClick={() => { setActiveTab("actividad"); fetchAuditLog(); }}
           style={{ ...QS.tab, ...(activeTab === "actividad" ? QS.tabActive : {}) }}
@@ -370,15 +348,16 @@ const QueuePanel = ({ pushToast }) => {
           <section style={QS.col}>
             <div style={QS.colHead}>
               <span style={QS.colTitle}>Cola</span>
-              <span style={QS.colCount}>{(snap.queued||[]).length}</span>
+              <span style={QS.colCount}>{(snap.queued||[]).length + pendingMerch.length}</span>
             </div>
             <div style={QS.list}>
-              {(snap.queued||[]).filter(matchesSearch).length === 0 ? (
+              {(snap.queued||[]).filter(matchesSearch).length === 0 && pendingGroups.length === 0 && (
                 <EmptyMini
                   label={search ? "Sin resultados" : "Sin cargas en cola"}
                   hint={search ? `No coincide ningún elemento con "${search}"` : "Se añaden automáticamente cuando se detecta la hora de acule"}
                 />
-              ) : (snap.queued||[]).filter(matchesSearch).map((it, i) => (
+              )}
+              {(snap.queued||[]).filter(matchesSearch).map((it, i) => (
                 <QueueCard
                   key={it.id}
                   item={it}
@@ -394,6 +373,36 @@ const QueuePanel = ({ pushToast }) => {
                   onSetComment={(text) => handleSetComment(it.id, text)}
                 />
               ))}
+              {pendingGroups.map((group) => {
+                const combinedCount = group[0].combined_count ?? group.reduce((s, it) => s + (it.numsup_count || 0), 0);
+                const isCombo = group.length > 1 || group[0].is_combined;
+                return (
+                  <div key={group[0].viaje_n || group[0].id} style={{ ...QS.card, borderLeft: "3px solid #dc2626", background: "#fff5f5" }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, background: "#fecaca", color: "#dc2626", padding: "2px 6px", borderRadius: 999, flexShrink: 0, marginTop: 1 }}>🔒 SIN MERCH</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#1c1917", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {group.map((it) => it.destino).join(" + ")}
+                        </div>
+                        <div style={{ fontSize: 10, color: "#78716c", marginTop: 2 }}>
+                          Nº {group[0].viaje_n} · {combinedCount} / {group[0].merch_threshold ?? 25} pales
+                          {isCombo && <span style={{ marginLeft: 5, fontWeight: 700, color: "#7c3aed" }}>· COMBINADO</span>}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 4, marginTop: 8, justifyContent: "flex-end" }}>
+                      <button
+                        onClick={() => { if (confirm("¿Priorizar aunque falte mercancía?")) handleForceQueued(group[0].id); }}
+                        style={{ fontSize: 11, padding: "3px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+                      >↑ Priorizar</button>
+                      <button
+                        onClick={() => handleRemove(group[0].id)}
+                        style={{ fontSize: 11, padding: "3px 8px", background: "#fff", border: "1px solid #fecaca", borderRadius: 4, color: "#dc2626", cursor: "pointer", fontFamily: "inherit" }}
+                      >✕</button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </section>
 
@@ -468,85 +477,6 @@ const QueuePanel = ({ pushToast }) => {
         </div>
       )}
 
-      {/* ─── Tab: Sin mercancía suficiente ─── */}
-      {activeTab === "sinmerch" && (
-        <div style={QS.sinMerchRoot}>
-          {pendingGroups.length === 0 ? (
-            <EmptyMini
-              label="Sin camiones en espera de mercancía"
-              hint="Todos los camiones aculados tienen suficiente mercancía supervisada (>25 pales)"
-            />
-          ) : pendingGroups.map((group) => {
-            const isCombo = group.length > 1 || group[0].is_combined;
-            const combinedCount = group[0].combined_count ?? group.reduce((s, it) => s + (it.numsup_count || 0), 0);
-            const nearDep = group.some((it) => {
-              const hs = it.hora_salida || "";
-              if (!hs.includes(":")) return false;
-              const [h, m] = hs.split(":").map(Number);
-              const now = new Date();
-              const dep = new Date(now);
-              dep.setHours(h, m, 0, 0);
-              // Si la hora ya pasó más de 5 min → es del día siguiente
-              if ((dep - now) < -5 * 60000) dep.setDate(dep.getDate() + 1);
-              const diffMin = (dep - now) / 60000;
-              return diffMin >= 0 && diffMin <= 45;
-            });
-            return (
-              <div key={group[0].viaje_n || group[0].id} style={{
-                ...QS.pendGroup,
-                borderLeft: nearDep ? "3px solid #d97706" : "3px solid #e7e5e4",
-              }}>
-                {/* Cabecera del grupo */}
-                <div style={QS.pendGroupHead}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    {isCombo && (
-                      <span style={QS.comboBadge}>COMBINADO</span>
-                    )}
-                    <span style={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#57534e" }}>
-                      Nº {group[0].viaje_n}
-                    </span>
-                    {group[0].tipo_carga && (
-                      <span style={{
-                        fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 999,
-                        background: group[0].tipo_carga === "REFRIGERADO" ? "#dbeafe" : "#ffedd5",
-                        color: group[0].tipo_carga === "REFRIGERADO" ? "#0c4a6e" : "#9a3412",
-                      }}>
-                        {group[0].tipo_carga === "REFRIGERADO" ? "❄" : "☼"} {group[0].tipo_carga}
-                      </span>
-                    )}
-                    {nearDep && (
-                      <span style={QS.urgentBadge}>⚡ &lt;45 min</span>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={QS.pendCount}>
-                      {combinedCount} / {group[0].merch_threshold ?? 25} pales
-                    </span>
-                    <button
-                      onClick={() => { if (confirm("¿Priorizar este viaje a la cola aunque falte mercancía?")) handleForceQueued(group[0].id); }}
-                      style={QS.prioritizeBtn}
-                      title="Forzar entrada a cola como urgente"
-                    >
-                      ↑ Priorizar
-                    </button>
-                  </div>
-                </div>
-
-                {/* Tarjetas de cada centro */}
-                {group.map((it) => (
-                  <PendingMerchCard
-                    key={it.id}
-                    item={it}
-                    onRemove={() => handleRemove(it.id)}
-                    onRefreshNumsup={(ruta) => handleRefreshNumsup(it.id, ruta)}
-                  />
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
       {/* ─── Tab: Cola refrigerado ─── */}
       {activeTab === "cola_refri" && (
         <div style={{ ...QS.grid, gridTemplateColumns: isTablet ? "1fr" : "1fr 1fr 1fr", overflowY: isTablet ? "auto" : "hidden" }}>
@@ -554,15 +484,16 @@ const QueuePanel = ({ pushToast }) => {
           <section style={QS.col}>
             <div style={QS.colHead}>
               <span style={QS.colTitle}>❄ Cola</span>
-              <span style={QS.colCount}>{(snap.queued_refr||[]).length}</span>
+              <span style={QS.colCount}>{(snap.queued_refr||[]).length + pendingMerchRefri.length}</span>
             </div>
             <div style={QS.list}>
-              {(snap.queued_refr||[]).filter(matchesSearch).length === 0 ? (
+              {(snap.queued_refr||[]).filter(matchesSearch).length === 0 && pendingGroupsRefri.length === 0 && (
                 <EmptyMini
                   label={search ? "Sin resultados" : "Sin cargas refrigeradas en cola"}
                   hint={search ? `No coincide con "${search}"` : "Se añaden al acularse un camión refrigerado sin marca A"}
                 />
-              ) : (snap.queued_refr||[]).filter(matchesSearch).map((it, i) => (
+              )}
+              {(snap.queued_refr||[]).filter(matchesSearch).map((it, i) => (
                 <QueueCard
                   key={it.id}
                   item={it}
@@ -578,6 +509,36 @@ const QueuePanel = ({ pushToast }) => {
                   onSetComment={(text) => handleSetComment(it.id, text)}
                 />
               ))}
+              {pendingGroupsRefri.map((group) => {
+                const combinedCount = group[0].combined_count ?? group.reduce((s, it) => s + (it.numsup_count || 0), 0);
+                const isCombo = group.length > 1 || group[0].is_combined;
+                return (
+                  <div key={group[0].viaje_n || group[0].id} style={{ ...QS.card, borderLeft: "3px solid #dc2626", background: "#fff5f5" }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, background: "#fecaca", color: "#dc2626", padding: "2px 6px", borderRadius: 999, flexShrink: 0, marginTop: 1 }}>🔒 SIN MERCH</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#1c1917", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {group.map((it) => it.destino).join(" + ")}
+                        </div>
+                        <div style={{ fontSize: 10, color: "#78716c", marginTop: 2 }}>
+                          Nº {group[0].viaje_n} · {combinedCount} / {group[0].merch_threshold ?? 25} pales
+                          {isCombo && <span style={{ marginLeft: 5, fontWeight: 700, color: "#7c3aed" }}>· COMBINADO</span>}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 4, marginTop: 8, justifyContent: "flex-end" }}>
+                      <button
+                        onClick={() => { if (confirm("¿Priorizar aunque falte mercancía?")) handleForceQueued(group[0].id); }}
+                        style={{ fontSize: 11, padding: "3px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+                      >↑ Priorizar</button>
+                      <button
+                        onClick={() => handleRemove(group[0].id)}
+                        style={{ fontSize: 11, padding: "3px 8px", background: "#fff", border: "1px solid #fecaca", borderRadius: 4, color: "#dc2626", cursor: "pointer", fontFamily: "inherit" }}
+                      >✕</button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </section>
 
@@ -646,49 +607,6 @@ const QueuePanel = ({ pushToast }) => {
               </>
             )}
           </section>
-        </div>
-      )}
-
-      {/* ─── Tab: Sin mercancía refrigerado ─── */}
-      {activeTab === "sinmerch_refri" && (
-        <div style={QS.sinMerchRoot}>
-          {pendingGroupsRefri.length === 0 ? (
-            <EmptyMini
-              label="Sin camiones refrigerados en espera de mercancía"
-              hint="Todos los camiones refrigerados aculados tienen suficiente mercancía supervisada"
-            />
-          ) : pendingGroupsRefri.map((group) => {
-            const isCombo = group.length > 1 || group[0].is_combined;
-            const combinedCount = group[0].combined_count ?? group.reduce((s, it) => s + (it.numsup_count || 0), 0);
-            const nearDep = group.some((it) => {
-              const hs = it.hora_salida || "";
-              if (!hs.includes(":")) return false;
-              const [h, m] = hs.split(":").map(Number);
-              const now = new Date(); const dep = new Date(now);
-              dep.setHours(h, m, 0, 0);
-              if ((dep - now) < -5 * 60000) dep.setDate(dep.getDate() + 1);
-              return (dep - now) / 60000 >= 0 && (dep - now) / 60000 <= 45;
-            });
-            return (
-              <div key={group[0].viaje_n || group[0].id} style={{ ...QS.pendGroup, borderLeft: nearDep ? "3px solid #d97706" : "3px solid #dbeafe" }}>
-                <div style={QS.pendGroupHead}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    {isCombo && <span style={QS.comboBadge}>COMBINADO</span>}
-                    <span style={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#57534e" }}>Nº {group[0].viaje_n}</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 999, background: "#dbeafe", color: "#0c4a6e" }}>❄ REFRIGERADO</span>
-                    {nearDep && <span style={QS.urgentBadge}>⚡ &lt;45 min</span>}
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={QS.pendCount}>{combinedCount} / {group[0].merch_threshold ?? 25} pales</span>
-                    <button onClick={() => { if (confirm("¿Priorizar este viaje a la cola aunque falte mercancía?")) handleForceQueued(group[0].id); }} style={QS.prioritizeBtn}>↑ Priorizar</button>
-                  </div>
-                </div>
-                {group.map((it) => (
-                  <PendingMerchCard key={it.id} item={it} onRemove={() => handleRemove(it.id)} onRefreshNumsup={(ruta) => handleRefreshNumsup(it.id, ruta)} />
-                ))}
-              </div>
-            );
-          })}
         </div>
       )}
 
@@ -1441,7 +1359,7 @@ const LoaderCard = ({ loader, current, onEdit, onRemove }) => (
 
 const DoneCard = ({ item, loader }) => {
   const [expanded, setExpanded] = React.useState(false);
-  const hasDetails = item.load_start_at || item.load_end_at || (item.checklist && Object.keys(item.checklist).length > 0) || (item.photos && item.photos.length > 0);
+  const hasData = item.load_start_at || item.load_end_at || (item.checklist && Object.keys(item.checklist).length > 0) || (item.photos && item.photos.length > 0);
   const [lightboxSrc, setLightboxSrc] = React.useState(null);
   return (
     <div style={QS.doneCard}>
@@ -1461,15 +1379,16 @@ const DoneCard = ({ item, loader }) => {
           <span style={{ fontSize: 10, color: "#15803d", fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", whiteSpace: "nowrap" }}>
             ✓ {item.completed_at || fmtT(item.finished_at)}
           </span>
-          {hasDetails && (
-            <button onClick={() => setExpanded(v => !v)} style={{ background: "transparent", border: "1px solid #e7e5e4", borderRadius: 5, fontSize: 10, color: "#78716c", cursor: "pointer", padding: "2px 7px", fontFamily: "inherit", whiteSpace: "nowrap" }}>
-              {expanded ? "▲" : "▼ ver"}
-            </button>
-          )}
+          <button onClick={() => setExpanded(v => !v)} style={{ background: "transparent", border: "1px solid #e7e5e4", borderRadius: 5, fontSize: 10, color: "#78716c", cursor: "pointer", padding: "2px 7px", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+            {expanded ? "▲" : "▼ ver"}
+          </button>
         </div>
       </div>
       {expanded && (
         <div style={{ marginTop: 10, borderTop: "1px solid #f4f4f3", paddingTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+          {!hasData && (
+            <div style={{ fontSize: 11, color: "#a8a29e", textAlign: "center", padding: "4px 0" }}>Sin datos adicionales registrados</div>
+          )}
           {(item.load_start_at || item.load_end_at) && (
             <div style={{ display: "flex", gap: 6 }}>
               {item.load_start_at && <span style={{ fontSize: 10, background: "#dcfce7", color: "#166534", padding: "2px 8px", borderRadius: 4, fontFamily: "ui-monospace, monospace" }}>▶ {fmtT(item.load_start_at)}</span>}
