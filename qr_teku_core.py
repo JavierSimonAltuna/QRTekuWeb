@@ -377,7 +377,7 @@ def load_excel(path: str) -> tuple[list[dict], str]:
             break
 
     raw.columns = _make_unique_columns(raw.iloc[hdr])
-    df = raw.iloc[hdr + 1:].reset_index(drop=True)
+    df = raw.iloc[hdr + 1:].reset_index(drop=True).head(600)
 
     # ── Detectar columnas con cabeceras multi-fila (filas anteriores a la fila DESTINO)
     # Busca la columna cuyas filas de pre-cabecera contienen "SALIDA"+"PREV" y "COD"+"CENTRO"
@@ -411,13 +411,6 @@ def load_excel(path: str) -> tuple[list[dict], str]:
     # Para evitar dejar matrículas iguales sin precinto distinto, agrupamos
     # los precintos por Nº viaje para cada fila.
     n_col = "Nº" if "Nº" in df.columns else ("N°" if "N°" in df.columns else None)
-
-    # Cargar solo las filas que tienen número de viaje; si no se detecta la columna, cargar todas.
-    if n_col:
-        def _has_n(x):
-            s = str(x).strip().lower()
-            return s not in ("", "nan", "none", "0")
-        df = df[df[n_col].apply(_has_n)].reset_index(drop=True)
 
     def _norm_n(x):
         s = _safe_str(x).strip()
