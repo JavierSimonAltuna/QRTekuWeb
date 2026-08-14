@@ -69,14 +69,39 @@ const QRTekuApp = () => {
   const beepAcule = useCallback(() => {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain); gain.connect(ctx.destination);
-      osc.frequency.value = 880;
-      gain.gain.setValueAtTime(0.35, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
-      osc.start(); osc.stop(ctx.currentTime + 0.6);
+      // Triple beep ascendente para acule
+      [0, 0.22, 0.44].forEach((delay, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.frequency.value = 660 + i * 220;
+        gain.gain.setValueAtTime(0.4, ctx.currentTime + delay);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.18);
+        osc.start(ctx.currentTime + delay);
+        osc.stop(ctx.currentTime + delay + 0.18);
+      });
     } catch (_) {}
+  }, []);
+
+  const notifyAcule = useCallback((count) => {
+    beepAcule();
+    pushToast(`🚛 ${count} camión${count > 1 ? "es" : ""} aculado${count > 1 ? "s" : ""}`, "success");
+    try {
+      if ("Notification" in window && Notification.permission === "granted") {
+        new Notification("PULSO · Acule detectado", {
+          body: `${count} camión${count > 1 ? "es" : ""} aculado${count > 1 ? "s" : ""} — revisar plan de carga`,
+          icon: "/assets/pulso-icon.svg",
+          tag: "acule",
+        });
+      }
+    } catch (_) {}
+  }, [beepAcule, pushToast]);
+
+  // ── Solicitar permiso de notificaciones del sistema ───────────
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
   }, []);
 
   // ── PyWebView detection ────────────────────────────────────────
@@ -119,8 +144,13 @@ const QRTekuApp = () => {
           });
           if (res.auto_enqueued > 0) {
             pushToast(`${res.auto_enqueued} carga(s) añadidas a la cola Bleecker`, "success");
-            beepAcule();
           }
+          // Detectar nuevos aculados (mismo mecanismo que tablet)
+          const newAculCount = (res.rows || []).filter(r => r.aculado && !r.ya_cargado).length;
+          if (prevAculadoCountRef.current !== null && newAculCount > prevAculadoCountRef.current) {
+            notifyAcule(newAculCount - prevAculadoCountRef.current);
+          }
+          prevAculadoCountRef.current = newAculCount;
         }
       } catch (e) { /* silencio */ }
       if (alive) tid = setTimeout(tick, 5000);
@@ -150,9 +180,7 @@ const QRTekuApp = () => {
           if (alive && res && res.ok) {
             const newAculCount = (res.rows || []).filter(r => r.aculado && !r.ya_cargado).length;
             if (prevAculadoCountRef.current !== null && newAculCount > prevAculadoCountRef.current) {
-              const diff = newAculCount - prevAculadoCountRef.current;
-              pushToast(`${diff} camión(es) aculado(s)`, "success");
-              beepAcule();
+              notifyAcule(newAculCount - prevAculadoCountRef.current);
             }
             prevAculadoCountRef.current = newAculCount;
             setRows(res.rows);
