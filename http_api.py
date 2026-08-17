@@ -39,6 +39,7 @@ ALLOWED_METHODS = {
     "queue_reassign",
     "queue_set_urgent",
     "queue_set_comment",
+    "queue_set_supervisor_files",
     "queue_force_queued",
     "queue_send_to_pending_merch",
     "queue_reset_done",

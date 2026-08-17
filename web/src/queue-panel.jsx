@@ -112,6 +112,12 @@ const QueuePanel = ({ pushToast }) => {
   const handleSetComment = async (id, text) => {
     const r = await window.api.call("queue_set_comment", id, text);
     if (r.ok) refresh();
+  };
+
+  const handleSetSupervisorFiles = async (id, files) => {
+    const r = await window.api.call("queue_set_supervisor_files", id, files);
+    if (r.ok) refresh();
+    else pushToast(r.error || "Error al guardar archivo", "error");
     else pushToast(r.error || "Error al guardar comentario", "error");
   };
 
@@ -371,6 +377,7 @@ const QueuePanel = ({ pushToast }) => {
                   onOpenReassign={() => setReassignFor(reassignFor === it.id ? null : it.id)}
                   onSendToPendingMerch={() => handleSendToPendingMerch(it.id)}
                   onSetComment={(text) => handleSetComment(it.id, text)}
+                  onSetSupervisorFiles={(files) => handleSetSupervisorFiles(it.id, files)}
                 />
               ))}
               {pendingGroups.map((group) => {
@@ -507,6 +514,7 @@ const QueuePanel = ({ pushToast }) => {
                   onOpenReassign={() => setReassignFor(reassignFor === it.id ? null : it.id)}
                   onSendToPendingMerch={() => handleSendToPendingMerch(it.id)}
                   onSetComment={(text) => handleSetComment(it.id, text)}
+                  onSetSupervisorFiles={(files) => handleSetSupervisorFiles(it.id, files)}
                 />
               ))}
               {pendingGroupsRefri.map((group) => {
@@ -986,10 +994,23 @@ const ComboBadge = () => (
   </span>
 );
 
-const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onRemove, onReassign, showReassignMenu, onOpenReassign, onSendToPendingMerch, onSetComment }) => {
+const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onRemove, onReassign, showReassignMenu, onOpenReassign, onSendToPendingMerch, onSetComment, onSetSupervisorFiles }) => {
   const [showCommentInput, setShowCommentInput] = React.useState(false);
   const [commentDraft, setCommentDraft] = React.useState(item.comment || "");
   const saveComment = () => { onSetComment(commentDraft.trim()); setShowCommentInput(false); };
+  const attachRef = React.useRef(null);
+  const handleAttach = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const b64 = ev.target.result.split(",")[1];
+      const existing = item.supervisor_files || [];
+      onSetSupervisorFiles([...existing, { name: file.name, type: file.type, data: b64 }].slice(-5));
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
   return (
   <div style={{
     ...QS.card,
@@ -1029,6 +1050,21 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onR
           style={{ ...QS.iconBtn, color: "#d97706", fontSize: 11, fontWeight: 700 }}>
           →⚠
         </button>
+        {item.source === "manual" && (
+          <>
+            <button
+              onClick={() => attachRef.current && attachRef.current.click()}
+              title="Adjuntar foto/archivo para el cargador"
+              style={{ ...QS.iconBtn, color: (item.supervisor_files || []).length > 0 ? "#7c3aed" : "#a8a29e" }}
+            >
+              📎
+              {(item.supervisor_files || []).length > 0 && (
+                <span style={{ fontSize: 8, fontWeight: 700, marginLeft: 1 }}>{(item.supervisor_files || []).length}</span>
+              )}
+            </button>
+            <input ref={attachRef} type="file" accept="image/*,.pdf" style={{ display: "none" }} onChange={handleAttach} />
+          </>
+        )}
         <button onClick={() => setShowCommentInput((v) => !v)} title="Añadir nota para el cargador"
           style={{ ...QS.iconBtn, color: item.comment ? "#0ea5e9" : "#a8a29e" }}>
           💬
@@ -1098,6 +1134,32 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onR
           <button onClick={() => { setCommentDraft(item.comment || ""); setShowCommentInput(false); }} style={QS.commentCancelBtn}>Cancelar</button>
           {item.comment && <button onClick={() => { setCommentDraft(""); onSetComment(""); setShowCommentInput(false); }} style={{ ...QS.commentCancelBtn, color: "#dc2626" }}>Borrar</button>}
         </div>
+      </div>
+    )}
+
+    {item.source === "manual" && (item.supervisor_files || []).length > 0 && (
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+        {(item.supervisor_files || []).map((f, i) => (
+          <div key={i} style={{ position: "relative" }}>
+            {f.type && f.type.startsWith("image/") ? (
+              <img
+                src={`data:${f.type};base64,${f.data}`}
+                alt={f.name}
+                style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 6, border: "1px solid #e7e5e4", display: "block" }}
+              />
+            ) : (
+              <div style={{ width: 52, height: 52, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#f4f4f3", borderRadius: 6, border: "1px solid #e7e5e4" }}>
+                <span style={{ fontSize: 20 }}>📄</span>
+                <span style={{ fontSize: 8, color: "#78716c", marginTop: 2 }}>{(f.name.split(".").pop() || "").toUpperCase()}</span>
+              </div>
+            )}
+            <button
+              onClick={() => onSetSupervisorFiles((item.supervisor_files || []).filter((_, j) => j !== i))}
+              style={{ position: "absolute", top: -5, right: -5, width: 16, height: 16, borderRadius: 99, background: "#dc2626", color: "#fff", border: "none", cursor: "pointer", fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}
+              title="Eliminar archivo"
+            >✕</button>
+          </div>
+        ))}
       </div>
     )}
 

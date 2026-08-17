@@ -340,6 +340,7 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
   );
   const toggleCheck = (key, val) => setChecklist(prev => ({ ...prev, [key]: val }));
   const [photos, setPhotos] = useState([]);
+  const [supLightbox, setSupLightbox] = useState(null);
   const fileInputRef = useRef(null);
   const distinctPlayas  = new Set((item.precintos || []).map(p => p.playa).filter(Boolean));
   const distinctDestinos = new Set((item.precintos || []).map(p => p.centro).filter(Boolean));
@@ -472,6 +473,52 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
               <span style={LS.commentLabel}>NOTA DEL SUPERVISOR</span>
             </div>
             <div style={LS.commentText}>{item.comment}</div>
+          </div>
+        )}
+
+        {/* ─── Archivos adjuntos del supervisor (solo cargas manuales) ─── */}
+        {item.source === "manual" && (item.supervisor_files || []).length > 0 && (
+          <div style={LS.supFilesCard}>
+            {supLightbox && (
+              <div
+                onClick={() => setSupLightbox(null)}
+                style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", cursor: "zoom-out" }}
+              >
+                <img src={supLightbox} alt="adjunto" style={{ maxWidth: "92vw", maxHeight: "92vh", borderRadius: 8 }} />
+              </div>
+            )}
+            <div style={LS.supFilesHead}>
+              <span style={{ fontSize: 13 }}>📎</span>
+              <span style={LS.supFilesLabel}>ARCHIVOS DEL SUPERVISOR</span>
+            </div>
+            <div style={LS.supFilesRow}>
+              {(item.supervisor_files || []).map((f, i) => {
+                const src = `data:${f.type};base64,${f.data}`;
+                const isImg = f.type && f.type.startsWith("image/");
+                return isImg ? (
+                  <img
+                    key={i}
+                    src={src}
+                    alt={f.name}
+                    style={LS.supThumb}
+                    onClick={() => setSupLightbox(src)}
+                  />
+                ) : (
+                  <a
+                    key={i}
+                    href={src}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={LS.supFileLink}
+                  >
+                    <span style={{ fontSize: 22 }}>📄</span>
+                    <span style={{ fontSize: 10, marginTop: 2, color: "#57534e", textAlign: "center", wordBreak: "break-all", maxWidth: 64 }}>
+                      {f.name}
+                    </span>
+                  </a>
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -890,6 +937,14 @@ const LS = {
   commentIcon: { fontSize: 14, lineHeight: 1 },
   commentLabel: { fontSize: 9.5, fontWeight: 700, letterSpacing: 1.2, color: "#92400e", textTransform: "uppercase" },
   commentText: { fontSize: 14, fontWeight: 500, color: "#1c1917", lineHeight: 1.5 },
+
+  // ── Archivos adjuntos supervisor ─────────────
+  supFilesCard: { background: "#f5f3ff", borderRadius: 12, padding: "12px 14px", marginTop: 10, border: "1px solid #ddd6fe" },
+  supFilesHead: { display: "flex", alignItems: "center", gap: 6, marginBottom: 10 },
+  supFilesLabel: { fontSize: 9.5, fontWeight: 700, letterSpacing: 1.2, color: "#5b21b6", textTransform: "uppercase" },
+  supFilesRow: { display: "flex", gap: 10, flexWrap: "wrap" },
+  supThumb: { width: 80, height: 80, objectFit: "cover", borderRadius: 8, border: "2px solid #ddd6fe", cursor: "zoom-in" },
+  supFileLink: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: 80, height: 80, background: "#ede9fe", borderRadius: 8, border: "2px solid #ddd6fe", textDecoration: "none", padding: 4 },
 
   // ── Info: ruta + palés ────────────────────────
   infoCard: { background: "#fff", borderRadius: 12, padding: "12px 16px", marginTop: 10, border: "1px solid #e7e5e4", display: "flex", flexDirection: "column", gap: 8 },

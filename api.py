@@ -767,6 +767,15 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def queue_set_supervisor_files(self, item_id: str, files: list) -> dict:
+        """Guarda los archivos adjuntos del supervisor (max 5, base64) en el item."""
+        try:
+            files = (files or [])[:5]
+            queue_manager.get_manager().update_item_fields(item_id, {"supervisor_files": files})
+            return {"ok": True, "count": len(files)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def queue_block(self, item_id: str) -> dict:
         """Bloquea un item de la cola para que no sea asignado automáticamente."""
         try:
