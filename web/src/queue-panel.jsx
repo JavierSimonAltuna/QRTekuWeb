@@ -118,7 +118,6 @@ const QueuePanel = ({ pushToast }) => {
     const r = await window.api.call("queue_set_supervisor_files", id, files);
     if (r.ok) refresh();
     else pushToast(r.error || "Error al guardar archivo", "error");
-    else pushToast(r.error || "Error al guardar comentario", "error");
   };
 
   const handleSendToPendingMerch = async (id) => {
