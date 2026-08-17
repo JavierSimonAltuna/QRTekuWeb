@@ -473,7 +473,7 @@ const QueuePanel = ({ pushToast }) => {
                   <span style={QS.colCount}>{snap.done.length}</span>
                 </div>
                 <div style={QS.list}>
-                  {[...snap.done].reverse().slice(0, 10).map((it) => (
+                  {[...snap.done].slice(0, 10).map((it) => (
                     <DoneCard key={it.id} item={it} loader={loaderById(it.assigned_to)} />
                   ))}
                 </div>
@@ -607,7 +607,7 @@ const QueuePanel = ({ pushToast }) => {
                   <span style={QS.colTitle}>Últimas completadas</span>
                 </div>
                 <div style={QS.list}>
-                  {[...snap.done].reverse().filter(it => it.queue_type === "refrigerado").slice(0, 10).map(it => (
+                  {[...snap.done].filter(it => it.queue_type === "refrigerado").slice(0, 10).map(it => (
                     <DoneCard key={it.id} item={it} loader={loaderById(it.assigned_to)} />
                   ))}
                 </div>
@@ -630,31 +630,9 @@ const QueuePanel = ({ pushToast }) => {
             <div style={{ padding: "40px 0", textAlign: "center", color: "#a8a29e", fontSize: 13 }}>
               Sin actividad registrada todavía
             </div>
-          ) : auditLog.map((e, i) => {
-            const actionColor = e.action === "asignada" ? "#15803d" : e.action === "finalizada" ? "#0ea5e9" : e.action === "encolada" ? "#7c3aed" : "#d97706";
-            const actionBg   = e.action === "asignada" ? "#dcfce7" : e.action === "finalizada" ? "#dbeafe" : e.action === "encolada" ? "#ede9fe" : "#fef3c7";
-            return (
-              <div key={i} style={{ background: "#fff", border: "1px solid #e7e5e4", borderRadius: 8, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12 }}>
-                <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: actionBg, color: actionColor, textTransform: "uppercase", whiteSpace: "nowrap" }}>
-                  {e.action}
-                </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#1c1917", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {e.destino || "—"}
-                    {e.viaje_n && <span style={{ fontSize: 11, color: "#a8a29e", marginLeft: 8, fontFamily: "ui-monospace, monospace" }}>#{e.viaje_n}</span>}
-                  </div>
-                  <div style={{ fontSize: 11, color: "#78716c", marginTop: 2 }}>
-                    Cargador: <b>{e.loader_id || "—"}</b>
-                    {e.muelle && <> · Muelle <b>{e.muelle}</b></>}
-                    {e.prev_loader_id && <> · antes: {e.prev_loader_id}</>}
-                  </div>
-                </div>
-                <span style={{ fontSize: 11, color: "#a8a29e", fontFamily: "ui-monospace, monospace", flexShrink: 0 }}>
-                  {(e.ts || "").slice(11, 16)}
-                </span>
-              </div>
-            );
-          })}
+          ) : auditLog.map((e, i) => (
+            <AuditEntry key={i} e={e} doneItem={snap.done.find(it => it.id === e.item_id)} />
+          ))}
         </div>
       )}
 
@@ -1469,6 +1447,97 @@ const DoneCard = ({ item, loader }) => {
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               {CHECKLIST_LABELS.map(({ key, label }) => {
                 const val = item.checklist[key];
+                if (val === undefined || val === null) return null;
+                return (
+                  <div key={key} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#57534e", padding: "1px 0" }}>
+                    <span>{label}</span>
+                    <span style={{ fontWeight: 700, color: val === true ? "#15803d" : "#dc2626" }}>{val === true ? "SÍ" : "NO"}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const AuditEntry = ({ e, doneItem }) => {
+  const [open, setOpen] = React.useState(false);
+  const actionColor = e.action === "asignada" ? "#15803d" : e.action === "finalizada" ? "#0ea5e9" : e.action === "encolada" ? "#7c3aed" : "#d97706";
+  const actionBg   = e.action === "asignada" ? "#dcfce7" : e.action === "finalizada" ? "#dbeafe" : e.action === "encolada" ? "#ede9fe" : "#fef3c7";
+  const hasData = doneItem && (doneItem.load_start_at || doneItem.load_end_at ||
+    (doneItem.checklist && Object.keys(doneItem.checklist).length > 0) ||
+    (doneItem.photos && doneItem.photos.length > 0) ||
+    (doneItem.supervisor_files && doneItem.supervisor_files.length > 0));
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e7e5e4", borderRadius: 8, overflow: "hidden" }}>
+      <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: actionBg, color: actionColor, textTransform: "uppercase", whiteSpace: "nowrap" }}>
+          {e.action}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#1c1917", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {e.destino || "—"}
+            {e.viaje_n && <span style={{ fontSize: 11, color: "#a8a29e", marginLeft: 8, fontFamily: "ui-monospace, monospace" }}>#{e.viaje_n}</span>}
+          </div>
+          <div style={{ fontSize: 11, color: "#78716c", marginTop: 2 }}>
+            Cargador: <b>{e.loader_id || "—"}</b>
+            {e.muelle && <> · Muelle <b>{e.muelle}</b></>}
+            {e.prev_loader_id && <> · antes: {e.prev_loader_id}</>}
+          </div>
+        </div>
+        <span style={{ fontSize: 11, color: "#a8a29e", fontFamily: "ui-monospace, monospace", flexShrink: 0 }}>
+          {(e.ts || "").slice(11, 16)}
+        </span>
+        {e.action === "finalizada" && (
+          <button
+            onClick={() => setOpen(v => !v)}
+            style={{ background: "transparent", border: "1px solid #e7e5e4", borderRadius: 5, fontSize: 10, color: "#78716c", cursor: "pointer", padding: "2px 7px", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}
+          >
+            {open ? "▲" : "▼ ver"}
+          </button>
+        )}
+      </div>
+      {open && e.action === "finalizada" && (
+        <div style={{ borderTop: "1px solid #f4f4f3", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+          {!hasData && (
+            <div style={{ fontSize: 11, color: "#a8a29e", textAlign: "center" }}>Sin datos adicionales registrados</div>
+          )}
+          {doneItem && (doneItem.load_start_at || doneItem.load_end_at) && (
+            <div style={{ display: "flex", gap: 6 }}>
+              {doneItem.load_start_at && <span style={{ fontSize: 10, background: "#dcfce7", color: "#166534", padding: "2px 8px", borderRadius: 4, fontFamily: "ui-monospace, monospace" }}>▶ {fmtT(doneItem.load_start_at)}</span>}
+              {doneItem.load_end_at   && <span style={{ fontSize: 10, background: "#dcfce7", color: "#166534", padding: "2px 8px", borderRadius: 4, fontFamily: "ui-monospace, monospace" }}>■ {fmtT(doneItem.load_end_at)}</span>}
+            </div>
+          )}
+          {doneItem && doneItem.photos && doneItem.photos.length > 0 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {doneItem.photos.map((src, i) => (
+                <img key={i} src={src} alt={`foto-${i+1}`} style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 6, border: "1px solid #e7e5e4" }} />
+              ))}
+            </div>
+          )}
+          {doneItem && doneItem.supervisor_files && doneItem.supervisor_files.length > 0 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {doneItem.supervisor_files.map((f, i) => {
+                const src = `data:${f.type};base64,${f.data}`;
+                return f.type && f.type.startsWith("image/") ? (
+                  <img key={i} src={src} alt={f.name} style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 6, border: "1px solid #ddd6fe" }} />
+                ) : (
+                  <a key={i} href={src} target="_blank" rel="noopener noreferrer"
+                    style={{ width: 64, height: 64, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#ede9fe", borderRadius: 6, border: "1px solid #ddd6fe", textDecoration: "none" }}>
+                    <span style={{ fontSize: 22 }}>📄</span>
+                    <span style={{ fontSize: 8, color: "#57534e", marginTop: 2 }}>{(f.name.split(".").pop() || "").toUpperCase()}</span>
+                  </a>
+                );
+              })}
+            </div>
+          )}
+          {doneItem && doneItem.checklist && Object.keys(doneItem.checklist).length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {CHECKLIST_LABELS.map(({ key, label }) => {
+                const val = doneItem.checklist[key];
                 if (val === undefined || val === null) return null;
                 return (
                   <div key={key} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#57534e", padding: "1px 0" }}>
