@@ -554,6 +554,22 @@ class Api:
             log_exc("graph_load_file", e)
             return {"ok": False, "error": str(e)}
 
+    def graph_download_b64(self, server_url: str) -> dict:
+        """Devuelve el contenido de un archivo SP como base64 (para apps web externas)."""
+        try:
+            r = _GraphReader()
+            if not r.is_configured():
+                return {"ok": False, "error": "No configurado"}
+            content, filename = r.download_bytes(server_url)
+            return {
+                "ok": True,
+                "filename": filename,
+                "content": base64.b64encode(content).decode("ascii"),
+            }
+        except Exception as e:
+            log_exc("graph_download_b64", e)
+            return {"ok": False, "error": str(e)}
+
     # ──────────────────────────────────────────────────────────────
     # ODBC: lookup CIF/Agencia
     # ──────────────────────────────────────────────────────────────

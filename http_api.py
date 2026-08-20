@@ -71,6 +71,7 @@ ALLOWED_METHODS = {
     "graph_test",
     "graph_list_files",
     "graph_load_file",
+    "graph_download_b64",
 }
 
 
