@@ -127,7 +127,14 @@ const LoaderApp = () => {
     setRefreshingPrec(false);
   };
 
-  const handleFinalize = (checklist, photos) => { setPendingChecklist(checklist || null); setPendingPhotos(photos || []); setScreen("confirming"); };
+  const handleFinalize = async (checklist, photos) => {
+    if (item && item.source === "manual" && item.load_start_at && !item.load_end_at) {
+      await handleSetLoadEnd();
+    }
+    setPendingChecklist(checklist || null);
+    setPendingPhotos(photos || []);
+    setScreen("confirming");
+  };
   const handleCancelConfirm = () => { setPendingChecklist(null); setPendingPhotos([]); setScreen("assigned"); };
 
   const handleConfirmFinish = async () => {
