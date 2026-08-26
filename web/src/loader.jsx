@@ -335,8 +335,11 @@ const WaitingScreen = ({ loader, queuedCount, requesting, onRequest, onLogout })
 // ───────────────────────────────────────────────────────────────
 const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecintos, refreshingPrec, onLogout, onSetLoadStart, onSetLoadEnd }) => {
   const tipoRefr = item.tipo_carga === "REFRIGERADO";
-  const [checklist, setChecklist] = useState(
-    () => Object.fromEntries(CHECKLIST_ITEMS.map(({ key }) => [key, false]))
+  const [checklist, setChecklist] = useState(() =>
+    Object.fromEntries(CHECKLIST_ITEMS.map(({ key }) => [
+      key,
+      key === "puertas" || key === "apto_alimentaria" ? true : false,
+    ]))
   );
   const toggleCheck = (key, val) => setChecklist(prev => ({ ...prev, [key]: val }));
   const [photos, setPhotos] = useState([]);

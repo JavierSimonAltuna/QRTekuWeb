@@ -162,8 +162,8 @@ const QueuePanel = ({ pushToast }) => {
 
   const openManualCarga = (defaultType = "ambiente") => setManualForm({
     destino: "", queue_type: defaultType, tractora: "", remolque: "",
-    muelle: "", playa: "", hora_salida: "", cam: "", cod_centro: "",
-    cif: "", agencia: "", urgente: false,
+    muelle: "", playa: "", cod_centro: "", cif: "",
+    ruta: "", pallets: "", urgente: false,
   });
 
   const handleSaveManual = async () => {
@@ -176,11 +176,10 @@ const QueuePanel = ({ pushToast }) => {
       matriculas: `${f.tractora.trim().toUpperCase()}/${f.remolque.trim().toUpperCase()}`,
       muelle: f.muelle.trim(),
       playa: f.playa.trim(),
-      hora_salida: f.hora_salida.trim(),
-      orden: f.cam.trim(),
       cod_centro: f.cod_centro.trim(),
       cif: f.cif.trim(),
-      agencia: f.agencia.trim(),
+      ruta: f.ruta.trim(),
+      pallets: f.pallets.trim(),
       tipo_viaje: f.queue_type,
       mercancia_ok: true,
     };
@@ -232,7 +231,8 @@ const QueuePanel = ({ pushToast }) => {
     try {
       const r = await window.api.call("get_audit_log");
       if (r.ok) setAuditLog(r.log || []);
-    } catch (e) { /* silencio */ }
+      else pushToast(r.error || "Error cargando historial", "error");
+    } catch (e) { pushToast("Error cargando historial: " + e.message, "error"); }
     setAuditLoading(false);
   };
 
@@ -915,6 +915,13 @@ const ManualCargaModal = ({ form, onChange, onSave, onClose }) => {
 
           <ManualField label="Destino *" value={form.destino} onChange={(v) => set("destino", v)} placeholder="COMPOSTELA" />
 
+          {form.destino.trim().toUpperCase().includes("LANZADERA") && (
+            <div style={{ background: "#fef9c3", border: "1px solid #fde047", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#854d0e", display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <span style={{ fontSize: 16 }}>⚠️</span>
+              <span><b>Carga de lanzadera:</b> Acuda al supervisor de carga para obtener el papel de lanzaderas.</span>
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: 10 }}>
             <div style={{ flex: 1 }}><ManualField label="Tractora" value={form.tractora} onChange={(v) => set("tractora", v)} placeholder="0805-MSG" mono /></div>
             <div style={{ flex: 1 }}><ManualField label="Remolque" value={form.remolque} onChange={(v) => set("remolque", v)} placeholder="R-0034-BCT" mono /></div>
@@ -923,17 +930,16 @@ const ManualCargaModal = ({ form, onChange, onSave, onClose }) => {
           <div style={{ display: "flex", gap: 10 }}>
             <div style={{ flex: 1 }}><ManualField label="Muelle" value={form.muelle} onChange={(v) => set("muelle", v)} placeholder="03" /></div>
             <div style={{ flex: 1 }}><ManualField label="Playa" value={form.playa} onChange={(v) => set("playa", v)} placeholder="5" /></div>
-            <div style={{ flex: 1 }}><ManualField label="Salida" value={form.hora_salida} onChange={(v) => set("hora_salida", v)} placeholder="23:45" /></div>
           </div>
 
           <div style={{ display: "flex", gap: 10 }}>
-            <div style={{ flex: 1 }}><ManualField label="Nº camión" value={form.cam} onChange={(v) => set("cam", v)} placeholder="002" /></div>
+            <div style={{ flex: 1 }}><ManualField label="Ruta" value={form.ruta} onChange={(v) => set("ruta", v)} placeholder="NORTE-01" /></div>
+            <div style={{ flex: 1 }}><ManualField label="Pallets" value={form.pallets} onChange={(v) => set("pallets", v)} placeholder="24" /></div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10 }}>
             <div style={{ flex: 1 }}><ManualField label="Cliente" value={form.cod_centro} onChange={(v) => set("cod_centro", v)} placeholder="0770" /></div>
-          </div>
-
-          <div style={{ display: "flex", gap: 10 }}>
             <div style={{ flex: 1 }}><ManualField label="CIF" value={form.cif} onChange={(v) => set("cif", v)} placeholder="A39020805" mono /></div>
-            <div style={{ flex: 1 }}><ManualField label="Agencia" value={form.agencia} onChange={(v) => set("agencia", v)} placeholder="BELINDA" /></div>
           </div>
 
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#1c1917", cursor: "pointer" }}>
@@ -974,6 +980,7 @@ const ComboBadge = () => (
 const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onRemove, onReassign, showReassignMenu, onOpenReassign, onSendToPendingMerch, onSetComment, onSetSupervisorFiles }) => {
   const [showCommentInput, setShowCommentInput] = React.useState(false);
   const [commentDraft, setCommentDraft] = React.useState(item.comment || "");
+  const [loaderSearch, setLoaderSearch] = React.useState("");
   const saveComment = () => { onSetComment(commentDraft.trim()); setShowCommentInput(false); };
   const attachRef = React.useRef(null);
   const handleAttach = (e) => {
@@ -1143,22 +1150,34 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onR
     {showReassignMenu && (
       <div style={QS.reassignMenu}>
         <div style={QS.reassignHint}>Asignar a:</div>
-        {loaders.filter((l) => l.active).sort((a,b) => a.id.localeCompare(b.id)).map((l) => (
-          <button key={l.id} onClick={() => onReassign(l.id)} style={QS.reassignOpt}>
-            <span style={QS.reassignDot} />
-            <span style={{ fontWeight: 600 }}>{l.id}</span>
-            <span style={{ color: "#a8a29e", marginLeft: 4 }}>· {l.name}</span>
-            <span style={{ flex: 1 }} />
-            <span style={QS.reassignMuelle}>M{(l.muelle_actual || "—").padStart(2, "0")}</span>
-          </button>
-        ))}
+        <input
+          autoFocus
+          value={loaderSearch}
+          onChange={(e) => setLoaderSearch(e.target.value)}
+          placeholder="Buscar cargador…"
+          style={{ width: "100%", padding: "5px 8px", fontSize: 11, border: "1px solid #e7e5e4", borderRadius: 5, fontFamily: "inherit", boxSizing: "border-box", marginBottom: 4, outline: "none" }}
+        />
+        {loaders
+          .filter((l) => l.active && (l.name.toLowerCase().includes(loaderSearch.toLowerCase()) || l.id.toLowerCase().includes(loaderSearch.toLowerCase())))
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map((l) => (
+            <button key={l.id} onClick={() => { onReassign(l.id); setLoaderSearch(""); }} style={QS.reassignOpt}>
+              <span style={QS.reassignDot} />
+              <span style={{ fontWeight: 600 }}>{l.name}</span>
+              <span style={{ color: "#a8a29e", marginLeft: 4 }}>· {l.id}</span>
+              <span style={{ flex: 1 }} />
+              <span style={QS.reassignMuelle}>M{(l.muelle_actual || "—").padStart(2, "0")}</span>
+            </button>
+          ))}
       </div>
     )}
   </div>
   );
 };
 
-const AssignedCard = ({ item, loader, helper, loaders, onReassign, onRemove, showReassignMenu, onOpenReassign, onAssignHelper, onRemoveHelper, showHelperMenu, onOpenHelperMenu }) => (
+const AssignedCard = ({ item, loader, helper, loaders, onReassign, onRemove, showReassignMenu, onOpenReassign, onAssignHelper, onRemoveHelper, showHelperMenu, onOpenHelperMenu }) => {
+  const [loaderSearch, setLoaderSearch] = React.useState("");
+  return (
   <div style={{ ...QS.card, background: "#eff6ff", borderLeft: "3px solid #0ea5e9" }}>
     <div style={QS.cardHead}>
       <div style={QS.cardLeft}>
@@ -1221,34 +1240,57 @@ const AssignedCard = ({ item, loader, helper, loaders, onReassign, onRemove, sho
             </button>
           </div>
         ) : (
-          loaders.filter((l) => l.active && l.id !== item.assigned_to).sort((a,b) => a.id.localeCompare(b.id)).map((l) => (
-            <button key={l.id} onClick={() => onAssignHelper(l.id)} style={QS.reassignOpt}>
-              <span style={{ ...QS.reassignDot, background: "#22c55e" }} />
-              <span style={{ fontWeight: 600 }}>{l.id}</span>
-              <span style={{ color: "#a8a29e", marginLeft: 4 }}>· {l.name}</span>
-              <span style={{ flex: 1 }} />
-              <span style={QS.reassignMuelle}>M{(l.muelle_actual || "—").padStart(2, "0")}</span>
-            </button>
-          ))
+          <>
+            <input
+              autoFocus
+              value={loaderSearch}
+              onChange={(e) => setLoaderSearch(e.target.value)}
+              placeholder="Buscar cargador…"
+              style={{ width: "100%", padding: "5px 8px", fontSize: 11, border: "1px solid #e7e5e4", borderRadius: 5, fontFamily: "inherit", boxSizing: "border-box", marginBottom: 4, outline: "none" }}
+            />
+            {loaders
+              .filter((l) => l.active && l.id !== item.assigned_to && (l.name.toLowerCase().includes(loaderSearch.toLowerCase()) || l.id.toLowerCase().includes(loaderSearch.toLowerCase())))
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((l) => (
+                <button key={l.id} onClick={() => { onAssignHelper(l.id); setLoaderSearch(""); }} style={QS.reassignOpt}>
+                  <span style={{ ...QS.reassignDot, background: "#22c55e" }} />
+                  <span style={{ fontWeight: 600 }}>{l.name}</span>
+                  <span style={{ color: "#a8a29e", marginLeft: 4 }}>· {l.id}</span>
+                  <span style={{ flex: 1 }} />
+                  <span style={QS.reassignMuelle}>M{(l.muelle_actual || "—").padStart(2, "0")}</span>
+                </button>
+              ))}
+          </>
         )}
       </div>
     )}
     {showReassignMenu && (
       <div style={QS.reassignMenu}>
         <div style={QS.reassignHint}>Reasignar a:</div>
-        {loaders.filter((l) => l.active && l.id !== item.assigned_to).sort((a,b) => a.id.localeCompare(b.id)).map((l) => (
-          <button key={l.id} onClick={() => onReassign(l.id)} style={QS.reassignOpt}>
-            <span style={QS.reassignDot} />
-            <span style={{ fontWeight: 600 }}>{l.id}</span>
-            <span style={{ color: "#a8a29e", marginLeft: 4 }}>· {l.name}</span>
-            <span style={{ flex: 1 }} />
-            <span style={QS.reassignMuelle}>M{(l.muelle_actual || "—").padStart(2, "0")}</span>
-          </button>
-        ))}
+        <input
+          autoFocus
+          value={loaderSearch}
+          onChange={(e) => setLoaderSearch(e.target.value)}
+          placeholder="Buscar cargador…"
+          style={{ width: "100%", padding: "5px 8px", fontSize: 11, border: "1px solid #e7e5e4", borderRadius: 5, fontFamily: "inherit", boxSizing: "border-box", marginBottom: 4, outline: "none" }}
+        />
+        {loaders
+          .filter((l) => l.active && l.id !== item.assigned_to && (l.name.toLowerCase().includes(loaderSearch.toLowerCase()) || l.id.toLowerCase().includes(loaderSearch.toLowerCase())))
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map((l) => (
+            <button key={l.id} onClick={() => { onReassign(l.id); setLoaderSearch(""); }} style={QS.reassignOpt}>
+              <span style={QS.reassignDot} />
+              <span style={{ fontWeight: 600 }}>{l.name}</span>
+              <span style={{ color: "#a8a29e", marginLeft: 4 }}>· {l.id}</span>
+              <span style={{ flex: 1 }} />
+              <span style={QS.reassignMuelle}>M{(l.muelle_actual || "—").padStart(2, "0")}</span>
+            </button>
+          ))}
       </div>
     )}
   </div>
-);
+  );
+};
 
 const PendingMerchCard = ({ item, onRemove, onRefreshNumsup }) => {
   const [editRuta, setEditRuta] = useState(false);
