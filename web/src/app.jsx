@@ -88,11 +88,11 @@ const QRTekuApp = () => {
   }, []);
 
   const _playBeeps = useCallback((ctx) => {
-    [0, 0.22, 0.44, 0.66, 0.88].forEach((delay, i) => {
+    [0, 0.22, 0.44, 0.66, 0.88].forEach((delay) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain); gain.connect(ctx.destination);
-      osc.frequency.value = 660 + i * 110;
+      osc.frequency.value = 2000;
       gain.gain.setValueAtTime(0.85, ctx.currentTime + delay);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.2);
       osc.start(ctx.currentTime + delay);
