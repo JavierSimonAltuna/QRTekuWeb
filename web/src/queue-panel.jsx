@@ -382,27 +382,25 @@ const QueuePanel = ({ pushToast }) => {
                 const combinedCount = group[0].combined_count ?? group.reduce((s, it) => s + (it.numsup_count || 0), 0);
                 const isCombo = group.length > 1 || group[0].is_combined;
                 return (
-                  <div key={group[0].viaje_n || group[0].id} style={{ ...QS.card, borderLeft: "3px solid #dc2626", background: "#fff5f5" }}>
-                    <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
-                      <span style={{ fontSize: 9, fontWeight: 700, background: "#fecaca", color: "#dc2626", padding: "2px 6px", borderRadius: 999, flexShrink: 0, marginTop: 1 }}>🔒 SIN MERCH</span>
+                  <div key={group[0].viaje_n || group[0].id} style={{ ...QS.card, borderLeft: "3px solid #dc2626", background: "#fff5f5", padding: "6px 9px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, background: "#fecaca", color: "#dc2626", padding: "2px 6px", borderRadius: 999, flexShrink: 0 }}>SIN MERCH</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 12, fontWeight: 700, color: "#1c1917", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {group.map((it) => it.destino).join(" + ")}
                         </div>
-                        <div style={{ fontSize: 10, color: "#78716c", marginTop: 2 }}>
-                          Nº {group[0].viaje_n} · {combinedCount} / {group[0].merch_threshold ?? 25} pales
-                          {isCombo && <span style={{ marginLeft: 5, fontWeight: 700, color: "#7c3aed" }}>· COMBINADO</span>}
+                        <div style={{ fontSize: 10, color: "#78716c" }}>
+                          Nº {group[0].viaje_n} · {combinedCount}/{group[0].merch_threshold ?? 25} pales
+                          {isCombo && <span style={{ marginLeft: 4, fontWeight: 700, color: "#7c3aed" }}>· COMB</span>}
                         </div>
                       </div>
-                    </div>
-                    <div style={{ display: "flex", gap: 4, marginTop: 5, justifyContent: "flex-end" }}>
                       <button
                         onClick={() => { if (confirm("¿Priorizar aunque falte mercancía?")) handleForceQueued(group[0].id); }}
-                        style={{ fontSize: 11, padding: "3px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+                        style={{ fontSize: 11, padding: "3px 8px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, flexShrink: 0 }}
                       >↑ Priorizar</button>
                       <button
                         onClick={() => handleRemove(group[0].id)}
-                        style={{ fontSize: 11, padding: "3px 8px", background: "#fff", border: "1px solid #fecaca", borderRadius: 4, color: "#dc2626", cursor: "pointer", fontFamily: "inherit" }}
+                        style={{ fontSize: 11, padding: "3px 7px", background: "#fff", border: "1px solid #fecaca", borderRadius: 4, color: "#dc2626", cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}
                       >✕</button>
                     </div>
                   </div>
@@ -519,27 +517,25 @@ const QueuePanel = ({ pushToast }) => {
                 const combinedCount = group[0].combined_count ?? group.reduce((s, it) => s + (it.numsup_count || 0), 0);
                 const isCombo = group.length > 1 || group[0].is_combined;
                 return (
-                  <div key={group[0].viaje_n || group[0].id} style={{ ...QS.card, borderLeft: "3px solid #dc2626", background: "#fff5f5" }}>
-                    <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
-                      <span style={{ fontSize: 9, fontWeight: 700, background: "#fecaca", color: "#dc2626", padding: "2px 6px", borderRadius: 999, flexShrink: 0, marginTop: 1 }}>🔒 SIN MERCH</span>
+                  <div key={group[0].viaje_n || group[0].id} style={{ ...QS.card, borderLeft: "3px solid #dc2626", background: "#fff5f5", padding: "6px 9px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, background: "#fecaca", color: "#dc2626", padding: "2px 6px", borderRadius: 999, flexShrink: 0 }}>SIN MERCH</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 12, fontWeight: 700, color: "#1c1917", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {group.map((it) => it.destino).join(" + ")}
                         </div>
-                        <div style={{ fontSize: 10, color: "#78716c", marginTop: 2 }}>
-                          Nº {group[0].viaje_n} · {combinedCount} / {group[0].merch_threshold ?? 25} pales
-                          {isCombo && <span style={{ marginLeft: 5, fontWeight: 700, color: "#7c3aed" }}>· COMBINADO</span>}
+                        <div style={{ fontSize: 10, color: "#78716c" }}>
+                          Nº {group[0].viaje_n} · {combinedCount}/{group[0].merch_threshold ?? 25} pales
+                          {isCombo && <span style={{ marginLeft: 4, fontWeight: 700, color: "#7c3aed" }}>· COMB</span>}
                         </div>
                       </div>
-                    </div>
-                    <div style={{ display: "flex", gap: 4, marginTop: 5, justifyContent: "flex-end" }}>
                       <button
                         onClick={() => { if (confirm("¿Priorizar aunque falte mercancía?")) handleForceQueued(group[0].id); }}
-                        style={{ fontSize: 11, padding: "3px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+                        style={{ fontSize: 11, padding: "3px 8px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, flexShrink: 0 }}
                       >↑ Priorizar</button>
                       <button
                         onClick={() => handleRemove(group[0].id)}
-                        style={{ fontSize: 11, padding: "3px 8px", background: "#fff", border: "1px solid #fecaca", borderRadius: 4, color: "#dc2626", cursor: "pointer", fontFamily: "inherit" }}
+                        style={{ fontSize: 11, padding: "3px 7px", background: "#fff", border: "1px solid #fecaca", borderRadius: 4, color: "#dc2626", cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}
                       >✕</button>
                     </div>
                   </div>
@@ -1644,10 +1640,10 @@ const QS = {
   colHead: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 18px", background: "#fafaf9", borderBottom: "1px solid #e7e5e4", flexShrink: 0 },
   colTitle: { fontSize: 11, fontWeight: 700, letterSpacing: 1.2, color: "#1c1917", textTransform: "uppercase" },
   colCount: { fontSize: 11, fontWeight: 600, color: "#a8a29e", padding: "2px 9px", background: "#fff", borderRadius: 999, border: "1px solid #e7e5e4" },
-  list: { flex: 1, overflowY: "auto", padding: "8px 10px 20px", display: "flex", flexDirection: "column", gap: 6 },
+  list: { flex: 1, overflowY: "auto", padding: "6px 8px 16px", display: "flex", flexDirection: "column", gap: 5 },
 
-  card: { background: "#fff", border: "1px solid #e7e5e4", borderRadius: 8, padding: "9px 10px", position: "relative", transition: "all 160ms" },
-  cardHead: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 },
+  card: { background: "#fff", border: "1px solid #e7e5e4", borderRadius: 7, padding: "7px 9px", position: "relative", transition: "all 160ms" },
+  cardHead: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
   cardLeft: { display: "flex", alignItems: "center", gap: 6, minWidth: 0, flexWrap: "wrap" },
   cardPos: { fontSize: 11, fontWeight: 700, color: "#a8a29e", fontFamily: "ui-monospace, monospace" },
   cardTicket: { fontSize: 11, fontWeight: 600, color: "#1c1917", fontFamily: "ui-monospace, monospace", letterSpacing: 0.5 },
