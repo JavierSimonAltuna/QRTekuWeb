@@ -444,6 +444,7 @@ class QueueManager:
             "queue_type": row.get("queue_type", "ambiente"),
             "gallego_urgente": bool(row.get("gallego_urgente", False)),
             "touliv1": row.get("touliv1"), "ruta_carga": row.get("ruta_carga"),
+            "ruta": row.get("ruta", ""), "pallets": row.get("pallets", ""),
             "comment": "", "blocked": False, "helper_id": None,
             "load_start_at": None, "load_end_at": None, "checklist": None, "photos": [],
             "reserved_for": None,
