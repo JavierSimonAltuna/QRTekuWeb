@@ -162,7 +162,7 @@ const QueuePanel = ({ pushToast }) => {
 
   const openManualCarga = (defaultType = "ambiente") => setManualForm({
     destino: "", queue_type: defaultType, tractora: "", remolque: "",
-    muelle: "", playa: "", cod_centro: "", cif: "",
+    muelle: "", playa: "", cod_centro: "",
     ruta: "", pallets: "", urgente: false,
   });
 
@@ -177,7 +177,6 @@ const QueuePanel = ({ pushToast }) => {
       muelle: f.muelle.trim(),
       playa: f.playa.trim(),
       cod_centro: f.cod_centro.trim(),
-      cif: f.cif.trim(),
       ruta: f.ruta.trim(),
       pallets: f.pallets.trim(),
       tipo_viaje: f.queue_type,
@@ -937,10 +936,7 @@ const ManualCargaModal = ({ form, onChange, onSave, onClose }) => {
             <div style={{ flex: 1 }}><ManualField label="Pallets" value={form.pallets} onChange={(v) => set("pallets", v)} placeholder="24" /></div>
           </div>
 
-          <div style={{ display: "flex", gap: 10 }}>
-            <div style={{ flex: 1 }}><ManualField label="Cliente" value={form.cod_centro} onChange={(v) => set("cod_centro", v)} placeholder="0770" /></div>
-            <div style={{ flex: 1 }}><ManualField label="CIF" value={form.cif} onChange={(v) => set("cif", v)} placeholder="A39020805" mono /></div>
-          </div>
+          <ManualField label="Cliente" value={form.cod_centro} onChange={(v) => set("cod_centro", v)} placeholder="0770" />
 
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#1c1917", cursor: "pointer" }}>
             <input type="checkbox" checked={form.urgente} onChange={(e) => set("urgente", e.target.checked)} />

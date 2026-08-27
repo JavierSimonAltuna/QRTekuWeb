@@ -448,8 +448,16 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
           </div>
         </div>
 
-        {/* ─── QR card (todas las cargas) ─── */}
-        <div style={LS.qrCard}>
+        {/* ─── Aviso lanzadera (cargas manuales) ─── */}
+        {item.source === "manual" && (item.destino || "").toUpperCase().includes("LANZADERA") && (
+          <div style={{ background: "#fef9c3", border: "1px solid #fde047", borderRadius: 10, padding: "12px 16px", fontSize: 13, color: "#854d0e", display: "flex", gap: 10, alignItems: "flex-start", margin: "0 0 4px" }}>
+            <span style={{ fontSize: 20 }}>⚠️</span>
+            <span><b>Carga de lanzadera:</b> Acuda al supervisor de carga para obtener el papel de lanzaderas.</span>
+          </div>
+        )}
+
+        {/* ─── QR card (solo cargas no manuales) ─── */}
+        {item.source !== "manual" && <div style={LS.qrCard}>
           <div style={LS.qrCardHead}>
             <span style={LS.qrCardKicker}>CARGA TEKU · CÓDIGO BLEECKER</span>
             <span style={{
@@ -473,7 +481,7 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
             <div style={LS.qrFootL}>{item.agencia || ""} {item.cif ? ` · CIF ${item.cif}` : ""}</div>
             <div style={LS.qrFootR}>{(item.queued_at || "").replace("T", " ").slice(0, 16)}</div>
           </div>
-        </div>
+        </div>}
 
         {/* ─── Comentario del supervisor ─── */}
         {item.comment && (
