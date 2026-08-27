@@ -541,22 +541,27 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
         )}
 
         {/* ─── Ruta y palés ─── */}
-        {(item.ruta_carga != null || item.numsup_count != null) && (
-          <div style={LS.infoCard}>
-            {item.ruta_carga != null && (
-              <div style={LS.infoRow}>
-                <span style={LS.infoLabel}>RUTA</span>
-                <span style={LS.infoValue}>{item.ruta_carga}</span>
-              </div>
-            )}
-            {item.numsup_count != null && (
-              <div style={LS.infoRow}>
-                <span style={LS.infoLabel}>PALÉS</span>
-                <span style={LS.infoValue}>{item.numsup_count}</span>
-              </div>
-            )}
-          </div>
-        )}
+        {(() => {
+          const ruta   = item.ruta_carga  ?? (item.ruta   || null);
+          const pales  = item.numsup_count != null ? item.numsup_count : (item.pallets || null);
+          if (!ruta && pales == null) return null;
+          return (
+            <div style={LS.infoCard}>
+              {ruta != null && ruta !== "" && (
+                <div style={LS.infoRow}>
+                  <span style={LS.infoLabel}>RUTA</span>
+                  <span style={LS.infoValue}>{ruta}</span>
+                </div>
+              )}
+              {pales != null && pales !== "" && (
+                <div style={LS.infoRow}>
+                  <span style={LS.infoLabel}>PALÉS</span>
+                  <span style={LS.infoValue}>{pales}</span>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* ─── Trazabilidad: inicio / fin carga (solo cargas manuales) ─── */}
         {item.source === "manual" && !isCombinedTrip && (
