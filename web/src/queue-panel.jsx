@@ -1512,28 +1512,19 @@ const AuditEntry = ({ e, doneItem }) => {
     (doneItem.photos && doneItem.photos.length > 0) ||
     (doneItem.supervisor_files && doneItem.supervisor_files.length > 0));
   return (
-    <div style={{ background: "#fff", border: "1px solid #e7e5e4", borderLeft: `3px solid ${c.border}`, borderRadius: 6, overflow: "hidden" }}>
-      <div style={{ padding: "10px 16px", display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 999, background: c.bg, color: c.color, textTransform: "uppercase", whiteSpace: "nowrap", flexShrink: 0, letterSpacing: 0.5, minWidth: 72, textAlign: "center" }}>
+    <div style={{ background: "#ffffff", borderTop: "1px solid #e7e5e4", borderBottom: "1px solid #e7e5e4", borderRight: "1px solid #e7e5e4", borderLeft: "4px solid " + c.border, borderRadius: "0 6px 6px 0", marginBottom: 4 }}>
+      <div style={{ padding: "9px 14px", lineHeight: "1.4" }}>
+        <span style={{ display: "inline-block", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: c.bg, color: c.color, textTransform: "uppercase", letterSpacing: 0.5, marginRight: 10, verticalAlign: "middle" }}>
           {c.label}
         </span>
-        <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "baseline", gap: 8, overflow: "hidden" }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: "#1c1917", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flexShrink: 1 }}>
-            {e.destino || "—"}
-          </span>
-          {e.viaje_n && <span style={{ fontSize: 11, color: "#a8a29e", fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap", flexShrink: 0 }}>#{e.viaje_n}</span>}
-          {e.loader_id && <span style={{ fontSize: 11, fontWeight: 700, color: c.color, whiteSpace: "nowrap", flexShrink: 0 }}>· {e.loader_id}</span>}
-          {e.muelle && <span style={{ fontSize: 11, color: "#78716c", whiteSpace: "nowrap", flexShrink: 0 }}>M{(e.muelle || "").padStart(2, "0")}</span>}
-          {e.prev_loader_id && <span style={{ fontSize: 11, color: "#a8a29e", whiteSpace: "nowrap", flexShrink: 0 }}>← {e.prev_loader_id}</span>}
-        </div>
-        <span style={{ fontSize: 11, color: "#a8a29e", fontFamily: "ui-monospace, monospace", flexShrink: 0 }}>
-          {(e.ts || "").slice(11, 16)}
-        </span>
+        <b style={{ fontSize: 13, color: "#111111", marginRight: 6 }}>{e.destino || "—"}</b>
+        {e.viaje_n && <span style={{ fontSize: 11, color: "#999999", marginRight: 6 }}>#{e.viaje_n}</span>}
+        {e.loader_id && <span style={{ fontSize: 11, fontWeight: 700, color: "#333333", marginRight: 6 }}>· {e.loader_id}</span>}
+        {e.muelle && <span style={{ fontSize: 11, color: "#666666", marginRight: 6 }}>M{e.muelle}</span>}
+        {e.prev_loader_id && <span style={{ fontSize: 11, color: "#999999", marginRight: 6 }}>← {e.prev_loader_id}</span>}
+        <span style={{ fontSize: 11, color: "#999999", float: "right" }}>{(e.ts || "").slice(11, 16)}</span>
         {e.action === "finalizada" && (
-          <button
-            onClick={() => setOpen(v => !v)}
-            style={{ background: "transparent", border: "1px solid #e7e5e4", borderRadius: 4, fontSize: 11, color: "#78716c", cursor: "pointer", padding: "2px 8px", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}
-          >
+          <button onClick={() => setOpen(v => !v)} style={{ float: "right", background: "transparent", border: "1px solid #e7e5e4", borderRadius: 4, fontSize: 10, color: "#78716c", cursor: "pointer", padding: "1px 7px", fontFamily: "inherit", marginRight: 8 }}>
             {open ? "▲" : "▼ ver"}
           </button>
         )}
