@@ -395,7 +395,7 @@ const QueuePanel = ({ pushToast }) => {
                         </div>
                       </div>
                     </div>
-                    <div style={{ display: "flex", gap: 4, marginTop: 8, justifyContent: "flex-end" }}>
+                    <div style={{ display: "flex", gap: 4, marginTop: 5, justifyContent: "flex-end" }}>
                       <button
                         onClick={() => { if (confirm("¿Priorizar aunque falte mercancía?")) handleForceQueued(group[0].id); }}
                         style={{ fontSize: 11, padding: "3px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
@@ -532,7 +532,7 @@ const QueuePanel = ({ pushToast }) => {
                         </div>
                       </div>
                     </div>
-                    <div style={{ display: "flex", gap: 4, marginTop: 8, justifyContent: "flex-end" }}>
+                    <div style={{ display: "flex", gap: 4, marginTop: 5, justifyContent: "flex-end" }}>
                       <button
                         onClick={() => { if (confirm("¿Priorizar aunque falte mercancía?")) handleForceQueued(group[0].id); }}
                         style={{ fontSize: 11, padding: "3px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
@@ -1644,20 +1644,20 @@ const QS = {
   colHead: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 18px", background: "#fafaf9", borderBottom: "1px solid #e7e5e4", flexShrink: 0 },
   colTitle: { fontSize: 11, fontWeight: 700, letterSpacing: 1.2, color: "#1c1917", textTransform: "uppercase" },
   colCount: { fontSize: 11, fontWeight: 600, color: "#a8a29e", padding: "2px 9px", background: "#fff", borderRadius: 999, border: "1px solid #e7e5e4" },
-  list: { flex: 1, overflowY: "auto", padding: "12px 12px 24px", display: "flex", flexDirection: "column", gap: 8 },
+  list: { flex: 1, overflowY: "auto", padding: "8px 10px 20px", display: "flex", flexDirection: "column", gap: 6 },
 
-  card: { background: "#fff", border: "1px solid #e7e5e4", borderRadius: 8, padding: 12, position: "relative", transition: "all 160ms" },
-  cardHead: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-  cardLeft: { display: "flex", alignItems: "center", gap: 8, minWidth: 0, flexWrap: "wrap" },
+  card: { background: "#fff", border: "1px solid #e7e5e4", borderRadius: 8, padding: "9px 10px", position: "relative", transition: "all 160ms" },
+  cardHead: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 },
+  cardLeft: { display: "flex", alignItems: "center", gap: 6, minWidth: 0, flexWrap: "wrap" },
   cardPos: { fontSize: 11, fontWeight: 700, color: "#a8a29e", fontFamily: "ui-monospace, monospace" },
   cardTicket: { fontSize: 11, fontWeight: 600, color: "#1c1917", fontFamily: "ui-monospace, monospace", letterSpacing: 0.5 },
-  cardRight: { display: "flex", gap: 4 },
-  iconBtn: { background: "transparent", border: "none", padding: 4, color: "#a8a29e", cursor: "pointer", display: "flex", alignItems: "center", borderRadius: 4 },
-  cardBody: { display: "flex", flexDirection: "column", gap: 6 },
+  cardRight: { display: "flex", gap: 2 },
+  iconBtn: { background: "transparent", border: "none", padding: 3, color: "#a8a29e", cursor: "pointer", display: "flex", alignItems: "center", borderRadius: 4 },
+  cardBody: { display: "flex", flexDirection: "column", gap: 4 },
   cardTitleRow: { display: "flex", justifyContent: "space-between", alignItems: "center" },
-  cardDestino: { fontSize: 14, fontWeight: 700, letterSpacing: -0.3, color: "#1c1917", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  cardDestino: { fontSize: 13, fontWeight: 700, letterSpacing: -0.3, color: "#1c1917", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   tipoBadge: { fontSize: 11, padding: "2px 7px", borderRadius: 999, fontWeight: 700 },
-  cardMeta: { display: "flex", gap: 12, alignItems: "center" },
+  cardMeta: { display: "flex", gap: 8, alignItems: "center" },
   cardTractora: { fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#78716c", fontWeight: 600 },
   meta: { display: "flex", flexDirection: "column", lineHeight: 1.1 },
   metaLbl: { fontSize: 9, fontWeight: 700, letterSpacing: 1, color: "#a8a29e", textTransform: "uppercase" },
