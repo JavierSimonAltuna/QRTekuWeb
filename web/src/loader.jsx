@@ -542,9 +542,10 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
 
         {/* ─── Ruta y palés ─── */}
         {(() => {
-          const ruta   = item.ruta_carga  ?? (item.ruta   || null);
-          const pales  = item.numsup_count != null ? item.numsup_count : (item.pallets || null);
-          if (!ruta && pales == null) return null;
+          const isManual = item.source === "manual";
+          const ruta  = isManual ? (item.ruta  || null) : (item.ruta_carga  != null && item.ruta_carga  !== "" ? item.ruta_carga  : null);
+          const pales = isManual ? (item.pallets || null) : (item.numsup_count != null ? item.numsup_count : null);
+          if (!ruta && (pales == null || pales === "")) return null;
           return (
             <div style={LS.infoCard}>
               {ruta != null && ruta !== "" && (
