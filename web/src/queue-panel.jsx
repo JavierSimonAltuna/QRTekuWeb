@@ -1497,40 +1497,44 @@ const DoneCard = ({ item, loader }) => {
   );
 };
 
+const AUDIT_CFG = {
+  asignada:   { color: "#166534", bg: "#dcfce7", border: "#22c55e",  label: "Asignada"   },
+  finalizada: { color: "#1e40af", bg: "#dbeafe", border: "#3b82f6",  label: "Finalizada" },
+  encolada:   { color: "#6d28d9", bg: "#ede9fe", border: "#8b5cf6",  label: "Encolada"   },
+  reasignada: { color: "#92400e", bg: "#fef3c7", border: "#f59e0b",  label: "Reasignada" },
+};
+
 const AuditEntry = ({ e, doneItem }) => {
   const [open, setOpen] = React.useState(false);
-  const actionColor = e.action === "asignada" ? "#15803d" : e.action === "finalizada" ? "#0ea5e9" : e.action === "encolada" ? "#7c3aed" : "#d97706";
-  const actionBg   = e.action === "asignada" ? "#dcfce7" : e.action === "finalizada" ? "#dbeafe" : e.action === "encolada" ? "#ede9fe" : "#fef3c7";
+  const c = AUDIT_CFG[e.action] || { color: "#57534e", bg: "#f4f4f3", border: "#a8a29e", label: e.action || "?" };
   const hasData = doneItem && (doneItem.load_start_at || doneItem.load_end_at ||
     (doneItem.checklist && Object.keys(doneItem.checklist).length > 0) ||
     (doneItem.photos && doneItem.photos.length > 0) ||
     (doneItem.supervisor_files && doneItem.supervisor_files.length > 0));
   return (
-    <div style={{ background: "#fff", border: "1px solid #e7e5e4", borderRadius: 8, overflow: "hidden" }}>
-      <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: actionBg, color: actionColor, textTransform: "uppercase", whiteSpace: "nowrap" }}>
-          {e.action}
+    <div style={{ background: "#fff", border: "1px solid #e7e5e4", borderLeft: `3px solid ${c.border}`, borderRadius: 6, overflow: "hidden" }}>
+      <div style={{ padding: "7px 12px", display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: c.bg, color: c.color, textTransform: "uppercase", whiteSpace: "nowrap", flexShrink: 0, letterSpacing: 0.5 }}>
+          {c.label}
         </span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "#1c1917", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "baseline", gap: 6, overflow: "hidden" }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#1c1917", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flexShrink: 1 }}>
             {e.destino || "—"}
-            {e.viaje_n && <span style={{ fontSize: 11, color: "#a8a29e", marginLeft: 8, fontFamily: "ui-monospace, monospace" }}>#{e.viaje_n}</span>}
-          </div>
-          <div style={{ fontSize: 11, color: "#78716c", marginTop: 2 }}>
-            Cargador: <b>{e.loader_id || "—"}</b>
-            {e.muelle && <> · Muelle <b>{e.muelle}</b></>}
-            {e.prev_loader_id && <> · antes: {e.prev_loader_id}</>}
-          </div>
+          </span>
+          {e.viaje_n && <span style={{ fontSize: 10, color: "#a8a29e", fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap", flexShrink: 0 }}>#{e.viaje_n}</span>}
+          {e.loader_id && <span style={{ fontSize: 10, fontWeight: 700, color: c.color, whiteSpace: "nowrap", flexShrink: 0 }}>· {e.loader_id}</span>}
+          {e.muelle && <span style={{ fontSize: 10, color: "#78716c", whiteSpace: "nowrap", flexShrink: 0 }}>M{(e.muelle || "").padStart(2, "0")}</span>}
+          {e.prev_loader_id && <span style={{ fontSize: 10, color: "#a8a29e", whiteSpace: "nowrap", flexShrink: 0 }}>← {e.prev_loader_id}</span>}
         </div>
-        <span style={{ fontSize: 11, color: "#a8a29e", fontFamily: "ui-monospace, monospace", flexShrink: 0 }}>
+        <span style={{ fontSize: 10, color: "#a8a29e", fontFamily: "ui-monospace, monospace", flexShrink: 0 }}>
           {(e.ts || "").slice(11, 16)}
         </span>
         {e.action === "finalizada" && (
           <button
             onClick={() => setOpen(v => !v)}
-            style={{ background: "transparent", border: "1px solid #e7e5e4", borderRadius: 5, fontSize: 10, color: "#78716c", cursor: "pointer", padding: "2px 7px", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}
+            style={{ background: "transparent", border: "1px solid #e7e5e4", borderRadius: 4, fontSize: 10, color: "#78716c", cursor: "pointer", padding: "1px 6px", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}
           >
-            {open ? "▲" : "▼ ver"}
+            {open ? "▲" : "▼"}
           </button>
         )}
       </div>
