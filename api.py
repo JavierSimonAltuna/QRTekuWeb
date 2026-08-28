@@ -769,6 +769,29 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def export_cargas_csv(self) -> dict:
+        """Genera cargas.csv + actividad.csv en SAVE_DIR y abre la carpeta en Explorer."""
+        try:
+            from datetime import datetime
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            core.SAVE_DIR.mkdir(parents=True, exist_ok=True)
+            mgr = queue_manager.get_manager()
+
+            path_cargas = core.SAVE_DIR / f"pulso_cargas_{ts}.csv"
+            path_cargas.write_text(mgr.export_csv(), encoding="utf-8-sig")
+
+            path_audit = core.SAVE_DIR / f"pulso_actividad_{ts}.csv"
+            path_audit.write_text(mgr.export_audit_csv(), encoding="utf-8-sig")
+
+            try:
+                import subprocess
+                subprocess.Popen(f'explorer /select,"{path_cargas}"')
+            except Exception:
+                pass
+            return {"ok": True, "cargas": str(path_cargas), "actividad": str(path_audit)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def queue_change_queue_type(self, item_id: str, new_type: str) -> dict:
         try:
             return queue_manager.get_manager().change_queue_type(item_id, new_type)

@@ -286,6 +286,17 @@ const QueuePanel = ({ pushToast }) => {
         <button onClick={handleOpenDebugLog} style={{ ...QS.odbcBtn, background: "#1c1917", color: "#fafaf9" }} title="Log de ejecución">
           Logs
         </button>
+        <button
+          onClick={async () => {
+            const r = await window.api.call("export_cargas_csv");
+            if (r.ok) pushToast("CSV exportado · se ha abierto la carpeta", "success");
+            else pushToast(r.error || "Error al exportar", "error");
+          }}
+          style={{ ...QS.odbcBtn, background: "#f0fdf4", color: "#15803d", borderColor: "#bbf7d0" }}
+          title="Exportar cargas y actividad a CSV"
+        >
+          ↓ CSV
+        </button>
         {(isRefriTab
           ? (snap.counts.queued_refr || 0) + (snap.counts.pending_merch_refr || 0)
           : snap.counts.queued + (snap.counts.pending_merch || 0)) > 0 && (

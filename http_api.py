@@ -52,6 +52,7 @@ ALLOWED_METHODS = {
     "queue_set_load_start",
     "queue_set_load_end",
     "queue_change_queue_type",
+    "export_cargas_csv",
     # Diagnóstico
     "get_odbc_diagnostics",
     "get_debug_log",

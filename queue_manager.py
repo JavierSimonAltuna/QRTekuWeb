@@ -876,6 +876,89 @@ class QueueManager:
             return {"ok": True, "removed": before}
 
 
+    def export_csv(self) -> str:
+        """Genera y devuelve el contenido CSV de todos los items históricos."""
+        import csv, io
+        from datetime import datetime as dt
+
+        with self._conn() as conn:
+            rows = conn.execute("SELECT data FROM items ORDER BY rowid").fetchall()
+            loader_rows = conn.execute("SELECT data FROM loaders").fetchall()
+
+        items = [json.loads(r[0]) for r in rows]
+        loader_names = {json.loads(r[0])["id"]: json.loads(r[0]).get("name", "") for r in loader_rows}
+
+        def _minutes(t1, t2):
+            if not t1 or not t2:
+                return ""
+            try:
+                fmt = "%Y-%m-%dT%H:%M:%S"
+                d1 = dt.fromisoformat(t1[:19])
+                d2 = dt.fromisoformat(t2[:19])
+                return round((d2 - d1).total_seconds() / 60, 1)
+            except Exception:
+                return ""
+
+        def _date(ts):
+            return ts[:10].replace("-", "/") if ts and len(ts) >= 10 else ""
+
+        def _hour(ts):
+            return ts[11:13] if ts and len(ts) >= 13 else ""
+
+        FIELDS = [
+            "id", "viaje_n", "destino", "source", "queue_type", "tipo_carga",
+            "status", "urgente",
+            "assigned_to", "loader_name", "helper_id", "helper_name",
+            "tractora", "remolque", "muelle", "playa",
+            "cod_centro", "agencia", "cif",
+            "ruta_carga", "ruta", "numsup_count", "pallets",
+            "is_combined", "hora_salida",
+            "fecha", "hora_encolada", "hora_asignada", "hora_inicio_carga", "hora_fin_carga",
+            "queued_at", "assigned_at", "load_start_at", "load_end_at",
+            "finished_at", "completed_at",
+            "min_espera_cola", "min_duracion_carga",
+            "comment",
+        ]
+        CHECKLIST_KEYS = [
+            "puertas", "suciedad_suelo", "suciedad_pared", "olores",
+            "humedad_hongos", "plagas", "desperfectos", "apto_alimentaria", "temperatura",
+        ]
+        all_fields = FIELDS + CHECKLIST_KEYS
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=all_fields, extrasaction="ignore")
+        writer.writeheader()
+        for it in items:
+            row = {f: it.get(f, "") for f in FIELDS}
+            row["loader_name"] = loader_names.get(it.get("assigned_to", ""), "")
+            row["helper_name"] = loader_names.get(it.get("helper_id", ""), "")
+            row["fecha"]             = _date(it.get("queued_at") or it.get("assigned_at"))
+            row["hora_encolada"]     = _hour(it.get("queued_at"))
+            row["hora_asignada"]     = _hour(it.get("assigned_at"))
+            row["hora_inicio_carga"] = _hour(it.get("load_start_at"))
+            row["hora_fin_carga"]    = _hour(it.get("load_end_at"))
+            row["min_espera_cola"]    = _minutes(it.get("queued_at"), it.get("assigned_at"))
+            row["min_duracion_carga"] = _minutes(it.get("load_start_at"), it.get("load_end_at"))
+            cl = it.get("checklist") or {}
+            for k in CHECKLIST_KEYS:
+                v = cl.get(k)
+                row[k] = ("SI" if v is True else "NO" if v is False else "")
+            writer.writerow(row)
+        return buf.getvalue()
+
+    def export_audit_csv(self) -> str:
+        """Genera y devuelve el contenido CSV del historial de auditoría."""
+        import csv, io
+        with self._conn() as conn:
+            rows = conn.execute("SELECT entry FROM audit ORDER BY rowid").fetchall()
+        entries = [json.loads(r[0]) for r in rows]
+        FIELDS = ["ts", "action", "item_id", "destino", "viaje_n", "loader_id", "muelle", "prev_loader_id", "urgente"]
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        for e in entries:
+            writer.writerow({f: e.get(f, "") for f in FIELDS})
+        return buf.getvalue()
+
 # ─── Singleton ─────────────────────────────────────────────────
 _manager: Optional[QueueManager] = None
 
