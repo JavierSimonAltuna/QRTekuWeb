@@ -435,6 +435,11 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
               </div>
             </div>
           </div>
+          {item.source === "manual" && item.destino && (
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#fafaf9", letterSpacing: -0.3, marginBottom: 8, marginTop: 2 }}>
+              {item.destino.toUpperCase()}
+            </div>
+          )}
           <div style={LS.muelleFoot}>
             <span style={LS.muelleFootKey}>TRACTORA</span> <span style={LS.muelleFootVal}>{item.tractora || "—"}</span>
             <span style={LS.muelleFootSep}>·</span>
