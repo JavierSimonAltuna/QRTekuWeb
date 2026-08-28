@@ -680,6 +680,18 @@ class QueueManager:
                     return {"ok": True}
             return {"ok": False, "error": "No encontrado o no está en cola"}
 
+    def change_queue_type(self, item_id: str, new_type: str) -> dict:
+        if new_type not in ("ambiente", "refrigerado"):
+            return {"ok": False, "error": "Tipo inválido"}
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id and it["status"] in ("queued", "assigned", "pending_merch"):
+                    it["queue_type"] = new_type
+                    it["tipo_carga"] = "REFRIGERADO" if new_type == "refrigerado" else "AMBIENTE"
+                    self._persist_item(it)
+                    return {"ok": True}
+            return {"ok": False, "error": "No encontrado"}
+
     def update_ruta_carga(self, item_id: str, ruta_carga: int, numsup_count: int, mercancia_ok: bool) -> dict:
         with self._lock:
             for it in self._items:

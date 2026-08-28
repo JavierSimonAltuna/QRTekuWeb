@@ -51,6 +51,7 @@ ALLOWED_METHODS = {
     "queue_remove_helper",
     "queue_set_load_start",
     "queue_set_load_end",
+    "queue_change_queue_type",
     # Diagnóstico
     "get_odbc_diagnostics",
     "get_debug_log",

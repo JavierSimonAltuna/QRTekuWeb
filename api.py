@@ -769,6 +769,12 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def queue_change_queue_type(self, item_id: str, new_type: str) -> dict:
+        try:
+            return queue_manager.get_manager().change_queue_type(item_id, new_type)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def queue_force_queued(self, item_id: str) -> dict:
         """Fuerza un item pending_merch a la cola como urgente."""
         try:

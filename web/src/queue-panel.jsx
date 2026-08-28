@@ -197,6 +197,14 @@ const QueuePanel = ({ pushToast }) => {
     } else pushToast(r.error || "Error al consultar ruta", "error");
   };
 
+  const handleChangeQueueType = async (id, newType) => {
+    const label = newType === "refrigerado" ? "refrigerado ❄" : "ambiente ☼";
+    if (!confirm(`¿Mover este viaje a la cola de ${label}?`)) return;
+    const r = await window.api.call("queue_change_queue_type", id, newType);
+    if (r.ok) { pushToast(`Viaje movido a cola ${label}`, "success"); refresh(); }
+    else pushToast(r.error || "Error", "error");
+  };
+
   const handleResetDone = async () => {
     if (!confirm("¿Limpiar el histórico de completadas?")) return;
     const r = await window.api.call("queue_reset_done");
@@ -376,6 +384,7 @@ const QueuePanel = ({ pushToast }) => {
                   onSendToPendingMerch={() => handleSendToPendingMerch(it.id)}
                   onSetComment={(text) => handleSetComment(it.id, text)}
                   onSetSupervisorFiles={(files) => handleSetSupervisorFiles(it.id, files)}
+                  onChangeQueueType={(t) => handleChangeQueueType(it.id, t)}
                 />
               ))}
               {pendingGroups.map((group) => {
@@ -436,6 +445,7 @@ const QueuePanel = ({ pushToast }) => {
                   onRemoveHelper={() => handleRemoveHelper(it.id)}
                   showHelperMenu={helperMenuFor === it.id}
                   onOpenHelperMenu={() => setHelperMenuFor(helperMenuFor === it.id ? null : it.id)}
+                  onChangeQueueType={(t) => handleChangeQueueType(it.id, t)}
                 />
               ))}
             </div>
@@ -511,6 +521,7 @@ const QueuePanel = ({ pushToast }) => {
                   onSendToPendingMerch={() => handleSendToPendingMerch(it.id)}
                   onSetComment={(text) => handleSetComment(it.id, text)}
                   onSetSupervisorFiles={(files) => handleSetSupervisorFiles(it.id, files)}
+                  onChangeQueueType={(t) => handleChangeQueueType(it.id, t)}
                 />
               ))}
               {pendingGroupsRefri.map((group) => {
@@ -571,6 +582,7 @@ const QueuePanel = ({ pushToast }) => {
                   onRemoveHelper={() => handleRemoveHelper(it.id)}
                   showHelperMenu={helperMenuFor === it.id}
                   onOpenHelperMenu={() => setHelperMenuFor(helperMenuFor === it.id ? null : it.id)}
+                  onChangeQueueType={(t) => handleChangeQueueType(it.id, t)}
                 />
               ))}
             </div>
@@ -969,7 +981,7 @@ const ComboBadge = () => (
   </span>
 );
 
-const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onRemove, onReassign, showReassignMenu, onOpenReassign, onSendToPendingMerch, onSetComment, onSetSupervisorFiles }) => {
+const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onRemove, onReassign, showReassignMenu, onOpenReassign, onSendToPendingMerch, onSetComment, onSetSupervisorFiles, onChangeQueueType }) => {
   const [showCommentInput, setShowCommentInput] = React.useState(false);
   const [commentDraft, setCommentDraft] = React.useState(item.comment || "");
   const [loaderSearch, setLoaderSearch] = React.useState("");
@@ -1045,6 +1057,15 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onR
           style={{ ...QS.iconBtn, color: item.comment ? "#0ea5e9" : "#a8a29e" }}>
           💬
         </button>
+        {onChangeQueueType && (
+          <button
+            onClick={() => onChangeQueueType(item.queue_type === "refrigerado" ? "ambiente" : "refrigerado")}
+            title={item.queue_type === "refrigerado" ? "Mover a cola ambiente ☼" : "Mover a cola refrigerado ❄"}
+            style={{ ...QS.iconBtn, fontSize: 12, color: item.queue_type === "refrigerado" ? "#9a3412" : "#0c4a6e" }}
+          >
+            {item.queue_type === "refrigerado" ? "☼" : "❄"}
+          </button>
+        )}
         <button onClick={onRemove} title="Quitar de cola"
           style={{ ...QS.iconBtn, color: "#a8a29e" }}>
           <IconX size={13} />
@@ -1167,7 +1188,7 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onR
   );
 };
 
-const AssignedCard = ({ item, loader, helper, loaders, onReassign, onRemove, showReassignMenu, onOpenReassign, onAssignHelper, onRemoveHelper, showHelperMenu, onOpenHelperMenu }) => {
+const AssignedCard = ({ item, loader, helper, loaders, onReassign, onRemove, showReassignMenu, onOpenReassign, onAssignHelper, onRemoveHelper, showHelperMenu, onOpenHelperMenu, onChangeQueueType }) => {
   const [loaderSearch, setLoaderSearch] = React.useState("");
   return (
   <div style={{ ...QS.card, background: "#eff6ff", borderLeft: "3px solid #0ea5e9" }}>
@@ -1196,6 +1217,15 @@ const AssignedCard = ({ item, loader, helper, loaders, onReassign, onRemove, sho
         <button onClick={onOpenReassign} title="Reasignar a otro cargador" style={QS.iconBtn}>
           <IconRefresh size={12} />
         </button>
+        {onChangeQueueType && (
+          <button
+            onClick={() => onChangeQueueType(item.queue_type === "refrigerado" ? "ambiente" : "refrigerado")}
+            title={item.queue_type === "refrigerado" ? "Mover a cola ambiente ☼" : "Mover a cola refrigerado ❄"}
+            style={{ ...QS.iconBtn, fontSize: 12, color: item.queue_type === "refrigerado" ? "#9a3412" : "#0c4a6e" }}
+          >
+            {item.queue_type === "refrigerado" ? "☼" : "❄"}
+          </button>
+        )}
         <button onClick={onRemove} title="Cancelar" style={QS.iconBtn}>
           <IconX size={13} />
         </button>
