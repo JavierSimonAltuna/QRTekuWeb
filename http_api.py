@@ -99,6 +99,33 @@ def make_handler(api, web_dir: str):
             self.send_response(204)
             self.end_headers()
 
+        def do_GET(self):
+            # Descarga directa de CSV — GET /api/download/cargas.csv o /api/download/actividad.csv
+            if self.path.startswith("/api/download/"):
+                name = self.path[len("/api/download/"):].split("?")[0]
+                try:
+                    if name == "cargas.csv":
+                        content = api.get_manager_csv("cargas")
+                        fname = "pulso_cargas.csv"
+                    elif name == "actividad.csv":
+                        content = api.get_manager_csv("actividad")
+                        fname = "pulso_actividad.csv"
+                    else:
+                        self._json(404, {"ok": False, "error": "Fichero no disponible"})
+                        return
+                    payload = content.encode("utf-8-sig")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/csv; charset=utf-8")
+                    self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                except Exception as e:
+                    self._json(500, {"ok": False, "error": str(e)})
+                return
+            # Resto de GETs → ficheros estáticos
+            super().do_GET()
+
         def do_POST(self):
             if not self.path.startswith("/api/"):
                 self._json(404, {"ok": False, "error": "Not found"})

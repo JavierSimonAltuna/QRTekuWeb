@@ -769,6 +769,13 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def get_manager_csv(self, tipo: str) -> str:
+        """Devuelve el contenido CSV en texto (usado por el endpoint GET de descarga)."""
+        mgr = queue_manager.get_manager()
+        if tipo == "actividad":
+            return mgr.export_audit_csv()
+        return mgr.export_csv()
+
     def export_cargas_csv(self) -> dict:
         """Genera cargas.csv + actividad.csv en SAVE_DIR y abre la carpeta en Explorer."""
         try:
