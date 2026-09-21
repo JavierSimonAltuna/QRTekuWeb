@@ -287,13 +287,18 @@ class QueueManager:
         with self._lock:
             added = 0
             active_statuses = ("queued", "assigned", "pending_merch")
+            today = datetime.now().strftime("%Y%m%d")
+
+            def _item_fecha(it):
+                return it.get("fecha") or (it.get("queued_at") or "")[:10].replace("-", "") or today
+
             present_single = {
-                (it["viaje_n"], it["destino"]): it
+                (it["viaje_n"], it["destino"], _item_fecha(it)): it
                 for it in self._items
                 if it["status"] in active_statuses and not it.get("is_combined")
             }
             present_combined = {
-                it["viaje_n"]: it
+                (it["viaje_n"], _item_fecha(it)): it
                 for it in self._items
                 if it["status"] in active_statuses and it.get("is_combined")
             }
@@ -304,8 +309,8 @@ class QueueManager:
                 done_items = [json.loads(r[0]) for r in db_rows]
             except Exception:
                 done_items = []
-            done_single    = {(it["viaje_n"], it["destino"]) for it in done_items if not it.get("is_combined")}
-            done_combined  = {it["viaje_n"] for it in done_items if it.get("is_combined")}
+            done_single    = {(it["viaje_n"], it["destino"], _item_fecha(it)) for it in done_items if not it.get("is_combined")}
+            done_combined  = {(it["viaje_n"], _item_fecha(it)) for it in done_items if it.get("is_combined")}
             combined_seen: set = set()
 
             for r in rows:
@@ -316,11 +321,14 @@ class QueueManager:
                     continue
                 is_combined = bool(r.get("is_combined", False))
 
+                r_fecha = r.get("fecha") or today
                 if is_combined:
-                    if n in done_combined:
+                    done_key_c = (n, r_fecha)
+                    if done_key_c in done_combined:
                         continue
-                    if n in present_combined:
-                        existing = present_combined[n]
+                    present_key_c = (n, r_fecha)
+                    if present_key_c in present_combined:
+                        existing = present_combined[present_key_c]
                         if existing["status"] == "pending_merch":
                             new_ok = bool(r.get("mercancia_ok", False))
                             existing["combined_count"]  = r.get("combined_count")
@@ -333,11 +341,11 @@ class QueueManager:
                                 added += 1
                                 self._persist_item(existing)
                         continue
-                    if n in combined_seen:
+                    if (n, r_fecha) in combined_seen:
                         continue
-                    combined_seen.add(n)
+                    combined_seen.add((n, r_fecha))
                 else:
-                    key = (n, r.get("destino", ""))
+                    key = (n, r.get("destino", ""), r_fecha)
                     if key in done_single:
                         continue
                     if key in present_single:
@@ -445,6 +453,7 @@ class QueueManager:
             "gallego_urgente": bool(row.get("gallego_urgente", False)),
             "touliv1": row.get("touliv1"), "ruta_carga": row.get("ruta_carga"),
             "ruta": row.get("ruta", ""), "pallets": row.get("pallets", ""),
+            "fecha": row.get("fecha") or datetime.now().strftime("%Y%m%d"),
             "comment": "", "blocked": False, "helper_id": None,
             "load_start_at": None, "load_end_at": None, "checklist": None, "photos": [],
             "reserved_for": None,
