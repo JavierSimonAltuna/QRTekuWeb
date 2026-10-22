@@ -66,20 +66,32 @@ def _norm_tractor(s: str) -> str:
     return (s or "").upper().replace(" ", "").replace("-", "").strip()
 
 
+def _parse_chf_response(data: dict) -> dict:
+    """Extrae cif/agencia de respuesta del bridge (anidada o plana)."""
+    if not (data and data.get("ok")):
+        return {}
+    nested = data.get("data")
+    if isinstance(nested, dict) and nested:
+        return nested
+    flat = {k: v for k, v in data.items() if k not in ("ok", "error", "data", "found")}
+    return flat if flat else {}
+
+
 def lookup_chf(matricula: str) -> dict:
     if not matricula:
         return {}
     tractora_norm = _norm_tractor(matricula)
+    # Intento 1: matrícula normalizada (sin guiones ni espacios)
     data = _get("/api/pulso/gezcam/lookup", {"matricula": tractora_norm})
-    if data and data.get("ok"):
-        # Soportar respuesta anidada {"data": {cif, agencia}} o plana {cif, agencia}
-        nested = data.get("data")
-        if isinstance(nested, dict) and nested:
-            return nested
-        # Intentar campos planos directamente en la respuesta
-        flat = {k: v for k, v in data.items() if k not in ("ok", "error", "data")}
-        if flat:
-            return flat
+    result = _parse_chf_response(data)
+    if result:
+        return result
+    # Intento 2: matrícula original (por si el bridge hace match sin normalizar)
+    if tractora_norm != matricula.upper().strip():
+        data2 = _get("/api/pulso/gezcam/lookup", {"matricula": matricula.upper().strip()})
+        result2 = _parse_chf_response(data2)
+        if result2:
+            return result2
     return {}
 
 
