@@ -8,6 +8,10 @@
     ],
     "rewrites": [
       {
+        "source": "/api/**",
+        "function": "api"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
@@ -20,5 +24,15 @@
         ]
       }
     ]
-  }
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "pulso",
+      "runtime": "python312",
+      "ignore": [
+        "venv", ".venv", "__pycache__", "*.pyc"
+      ]
+    }
+  ]
 }

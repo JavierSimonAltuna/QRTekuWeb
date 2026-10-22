@@ -1,29 +1,10 @@
-// API shim — unifica llamadas a Python:
-//   - Si window.pywebview.api existe (dentro de la ventana desktop) → bridge nativo
-//   - Si no (móvil en LAN o Firebase Hosting) → fetch POST <base>/api/<método>
-//
-// Base URL del backend (Python HTTP server):
-//   - Por defecto: URL relativa → mismo origen (cuando Python sirve los ficheros)
-//   - Firebase Hosting u otro CDN: configura window.PULSO_BACKEND o query-param ?backend=http://192.168.x.x:8765
-//   - El parámetro ?backend=... se guarda en localStorage para no tener que introducirlo cada vez
+// API shim — unifica llamadas a Python/Firebase:
+//   - Si window.pywebview.api existe (desktop legacy) → bridge nativo
+//   - Si no → fetch POST /api/<método>  (Firebase Hosting rewrite → Cloud Function)
 // Uso: await api.call('loader_login', '1234')
 (function () {
   const params = new URLSearchParams(location.search);
   const mode = params.get("mode") || "supervisor";
-
-  // Detectar y persistir URL del backend
-  const STORAGE_KEY = "pulso_backend_url";
-  let backendBase = "";
-  const fromQuery = params.get("backend");
-  if (fromQuery) {
-    const normalized = fromQuery.replace(/\/$/, "");
-    try { localStorage.setItem(STORAGE_KEY, normalized); } catch (_) {}
-    backendBase = normalized;
-  } else if (window.PULSO_BACKEND) {
-    backendBase = window.PULSO_BACKEND.replace(/\/$/, "");
-  } else {
-    try { backendBase = localStorage.getItem(STORAGE_KEY) || ""; } catch (_) {}
-  }
 
   function bridgeAvailable(method) {
     return (
@@ -34,8 +15,7 @@
   }
 
   async function viaHttp(method, args) {
-    const url = backendBase ? `${backendBase}/api/${method}` : `/api/${method}`;
-    const resp = await fetch(url, {
+    const resp = await fetch(`/api/${method}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ args: args || [], kwargs: {} }),
@@ -56,5 +36,5 @@
     return viaHttp(method, args);
   }
 
-  window.api = { call, mode, backendBase };
+  window.api = { call, mode };
 })();
