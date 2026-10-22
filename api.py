@@ -819,6 +819,13 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def queue_set_traffic_comment(self, item_id: str, traffic_comment: str) -> dict:
+        """Guarda el comentario de tráfico (morado) para un item de la cola."""
+        try:
+            return queue_manager.get_manager().set_traffic_comment(item_id, str(traffic_comment or ""))
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def queue_set_supervisor_files(self, item_id: str, files: list) -> dict:
         """Guarda los archivos adjuntos del supervisor (max 5, base64) en el item."""
         try:

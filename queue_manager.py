@@ -421,13 +421,22 @@ class QueueManager:
 
         tipo_raw = (row.get("tipo") or "").upper()
         exp_raw  = (row.get("expedicion") or "").upper()
+        qt_raw   = row.get("queue_type", "ambiente")
         is_refr  = (
             "REFR" in tipo_raw or "FRIO" in tipo_raw or "REFR" in exp_raw
-            or row.get("queue_type") == "refrigerado"
+            or qt_raw == "refrigerado"
         )
+        is_conge = qt_raw == "congelado"
         hora_salida   = self._derive_salida(row)
         mercancia_ok  = bool(row.get("mercancia_ok", True))
         initial_status = "queued" if mercancia_ok else "pending_merch"
+
+        if is_conge:
+            tipo_carga = "CONGELADO"
+        elif is_refr:
+            tipo_carga = "REFRIGERADO"
+        else:
+            tipo_carga = "AMBIENTE"
 
         return {
             "id": ticket_id, "viaje_n": viaje_n,
@@ -436,7 +445,7 @@ class QueueManager:
             "playa": row.get("playa", ""), "muelle": row.get("muelle", ""),
             "hora_salida": hora_salida, "hora_acule": row.get("hora_acule", ""),
             "expedicion": row.get("expedicion", ""), "cod_centro": row.get("cod_centro", ""),
-            "tipo_carga": "REFRIGERADO" if is_refr else "AMBIENTE",
+            "tipo_carga": tipo_carga,
             "agencia": row.get("agencia", ""), "cif": row.get("cif", ""),
             "precintos": row.get("precintos_data", []),
             "qr_png_b64": qr_b64, "qr_payload_compact": compact,
@@ -449,12 +458,12 @@ class QueueManager:
             "is_combined": bool(row.get("is_combined", False)),
             "trip_destinos": row.get("trip_destinos", []), "trip_centers": row.get("trip_centers", []),
             "merch_threshold": row.get("merch_threshold"),
-            "queue_type": row.get("queue_type", "ambiente"),
+            "queue_type": qt_raw,
             "gallego_urgente": bool(row.get("gallego_urgente", False)),
             "touliv1": row.get("touliv1"), "ruta_carga": row.get("ruta_carga"),
             "ruta": row.get("ruta", ""), "pallets": row.get("pallets", ""),
             "fecha": row.get("fecha") or datetime.now().strftime("%Y%m%d"),
-            "comment": "", "blocked": False, "helper_id": None,
+            "comment": "", "traffic_comment": "", "blocked": False, "helper_id": None,
             "load_start_at": None, "load_end_at": None, "checklist": None, "photos": [],
             "reserved_for": None,
         }
@@ -624,6 +633,15 @@ class QueueManager:
                     return {"ok": True}
             return {"ok": False, "error": "No encontrado"}
 
+    def set_traffic_comment(self, item_id: str, traffic_comment: str) -> dict:
+        with self._lock:
+            for it in self._items:
+                if it["id"] == item_id:
+                    it["traffic_comment"] = str(traffic_comment or "").strip()
+                    self._persist_item(it)
+                    return {"ok": True}
+            return {"ok": False, "error": "No encontrado"}
+
     def set_urgent(self, item_id: str, urgente: bool) -> dict:
         with self._lock:
             for it in self._items:
@@ -690,13 +708,14 @@ class QueueManager:
             return {"ok": False, "error": "No encontrado o no está en cola"}
 
     def change_queue_type(self, item_id: str, new_type: str) -> dict:
-        if new_type not in ("ambiente", "refrigerado"):
+        if new_type not in ("ambiente", "refrigerado", "congelado"):
             return {"ok": False, "error": "Tipo inválido"}
+        _tipo_map = {"ambiente": "AMBIENTE", "refrigerado": "REFRIGERADO", "congelado": "CONGELADO"}
         with self._lock:
             for it in self._items:
                 if it["id"] == item_id and it["status"] in ("queued", "assigned", "pending_merch"):
                     it["queue_type"] = new_type
-                    it["tipo_carga"] = "REFRIGERADO" if new_type == "refrigerado" else "AMBIENTE"
+                    it["tipo_carga"] = _tipo_map[new_type]
                     self._persist_item(it)
                     return {"ok": True}
             return {"ok": False, "error": "No encontrado"}
@@ -758,10 +777,13 @@ class QueueManager:
 
             queued_amb   = sorted([it for it in self._items if it["status"] == "queued"       and _qt(it) == "ambiente"],     key=sort_q)
             queued_ref   = sorted([it for it in self._items if it["status"] == "queued"       and _qt(it) == "refrigerado"],  key=sort_q)
+            queued_con   = sorted([it for it in self._items if it["status"] == "queued"       and _qt(it) == "congelado"],   key=sort_q)
             assigned_amb =        [it for it in self._items if it["status"] == "assigned"     and _qt(it) == "ambiente"]
             assigned_ref =        [it for it in self._items if it["status"] == "assigned"     and _qt(it) == "refrigerado"]
+            assigned_con =        [it for it in self._items if it["status"] == "assigned"     and _qt(it) == "congelado"]
             pending_amb  = sorted([it for it in self._items if it["status"] == "pending_merch" and _qt(it) == "ambiente"],   key=sort_p)
             pending_ref  = sorted([it for it in self._items if it["status"] == "pending_merch" and _qt(it) == "refrigerado"], key=sort_p)
+            pending_con  = sorted([it for it in self._items if it["status"] == "pending_merch" and _qt(it) == "congelado"],  key=sort_p)
 
             # Done: últimos 50 de la DB (histórico completo)
             try:
@@ -775,20 +797,23 @@ class QueueManager:
 
             blocked_count = sum(1 for it in self._items if it["status"] == "queued" and it.get("blocked"))
             return {
-                "queued": queued_amb, "queued_refr": queued_ref,
-                "assigned": assigned_amb, "assigned_refr": assigned_ref,
+                "queued": queued_amb, "queued_refr": queued_ref, "queued_con": queued_con,
+                "assigned": assigned_amb, "assigned_refr": assigned_ref, "assigned_con": assigned_con,
                 "done": done,
-                "pending_merch": pending_amb, "pending_merch_refr": pending_ref,
+                "pending_merch": pending_amb, "pending_merch_refr": pending_ref, "pending_merch_con": pending_con,
                 "loaders": self._loaders,
                 "counts": {
-                    "queued":           len(queued_amb),
-                    "queued_refr":      len(queued_ref),
-                    "assigned":         len(assigned_amb),
-                    "assigned_refr":    len(assigned_ref),
-                    "done":             len(done),
-                    "pending_merch":    len(pending_amb),
+                    "queued":             len(queued_amb),
+                    "queued_refr":        len(queued_ref),
+                    "queued_con":         len(queued_con),
+                    "assigned":           len(assigned_amb),
+                    "assigned_refr":      len(assigned_ref),
+                    "assigned_con":       len(assigned_con),
+                    "done":               len(done),
+                    "pending_merch":      len(pending_amb),
                     "pending_merch_refr": len(pending_ref),
-                    "blocked":          blocked_count,
+                    "pending_merch_con":  len(pending_con),
+                    "blocked":            blocked_count,
                 },
             }
 

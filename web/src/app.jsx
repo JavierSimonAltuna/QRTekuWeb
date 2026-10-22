@@ -600,7 +600,7 @@ const QRTekuApp = () => {
           <div style={S.connStatus}>
             <span style={{ width: 7, height: 7, borderRadius: "50%", background: connected ? "#22c55e" : "#a8a29e", boxShadow: connected ? "0 0 0 3px rgba(34,197,94,0.18)" : "none" }} />
             <span style={{ fontSize: 11.5, color: "rgba(255,255,255,0.78)", fontWeight: 500 }}>
-              {connected ? "ODBC INFOLOG" : "Modo demo"}
+              {connected ? "ODBC INFOLOG" : "Modo online"}
             </span>
           </div>
         </div>

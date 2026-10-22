@@ -114,6 +114,11 @@ const QueuePanel = ({ pushToast }) => {
     if (r.ok) refresh();
   };
 
+  const handleSetTrafficComment = async (id, text) => {
+    const r = await window.api.call("queue_set_traffic_comment", id, text);
+    if (r.ok) refresh();
+  };
+
   const handleSetSupervisorFiles = async (id, files) => {
     const r = await window.api.call("queue_set_supervisor_files", id, files);
     if (r.ok) refresh();
@@ -198,7 +203,8 @@ const QueuePanel = ({ pushToast }) => {
   };
 
   const handleChangeQueueType = async (id, newType) => {
-    const label = newType === "refrigerado" ? "refrigerado ❄" : "ambiente ☼";
+    const labelMap = { "refrigerado": "refrigerado ❄", "ambiente": "ambiente ☼", "congelado": "congelado ❄❄" };
+    const label = labelMap[newType] || newType;
     if (!confirm(`¿Mover este viaje a la cola de ${label}?`)) return;
     const r = await window.api.call("queue_change_queue_type", id, newType);
     if (r.ok) { pushToast(`Viaje movido a cola ${label}`, "success"); refresh(); }
@@ -246,9 +252,12 @@ const QueuePanel = ({ pushToast }) => {
   const loaderById = (id) => snap.loaders.find((l) => l.id === id);
   const pendingMerch      = snap.pending_merch      || [];
   const pendingMerchRefri = snap.pending_merch_refr || [];
+  const pendingMerchCon   = snap.pending_merch_con  || [];
   const ambLoaders   = snap.loaders.filter(l => (l.queue_type || "ambiente") === "ambiente").sort((a,b) => a.id.localeCompare(b.id));
   const refriLoaders = snap.loaders.filter(l => (l.queue_type || "ambiente") === "refrigerado").sort((a,b) => a.id.localeCompare(b.id));
+  const conLoaders   = snap.loaders.filter(l => (l.queue_type || "ambiente") === "congelado").sort((a,b) => a.id.localeCompare(b.id));
   const isRefriTab = activeTab === "cola_refri";
+  const isConTab   = activeTab === "cola_con";
 
   const makePendingGroups = (items) => {
     const map = {};
@@ -261,19 +270,20 @@ const QueuePanel = ({ pushToast }) => {
   };
   const pendingGroups      = makePendingGroups(pendingMerch);
   const pendingGroupsRefri = makePendingGroups(pendingMerchRefri);
+  const pendingGroupsCon   = makePendingGroups(pendingMerchCon);
 
   return (
     <div style={QS.root}>
       {/* ─── Header stats + tabs ─── */}
       <div style={QS.stats}>
-        <StatBig label="En cola"     value={isRefriTab ? (snap.counts.queued_refr||0)       : snap.counts.queued}   color="#1c1917" />
-        <StatBig label="Asignadas"   value={isRefriTab ? (snap.counts.assigned_refr||0)     : snap.counts.assigned} color="#0ea5e9" />
+        <StatBig label="En cola"     value={isConTab ? (snap.counts.queued_con||0) : isRefriTab ? (snap.counts.queued_refr||0) : snap.counts.queued}   color="#1c1917" />
+        <StatBig label="Asignadas"   value={isConTab ? (snap.counts.assigned_con||0) : isRefriTab ? (snap.counts.assigned_refr||0) : snap.counts.assigned} color="#0ea5e9" />
         <StatBig label="Completadas" value={snap.counts.done} color="#15803d" />
-        {(isRefriTab ? (snap.counts.pending_merch_refr||0) : (snap.counts.pending_merch||0)) > 0 && (
-          <StatBig label="Sin mercancía" value={isRefriTab ? (snap.counts.pending_merch_refr||0) : snap.counts.pending_merch} color="#d97706" />
+        {(isConTab ? (snap.counts.pending_merch_con||0) : isRefriTab ? (snap.counts.pending_merch_refr||0) : (snap.counts.pending_merch||0)) > 0 && (
+          <StatBig label="Sin mercancía" value={isConTab ? (snap.counts.pending_merch_con||0) : isRefriTab ? (snap.counts.pending_merch_refr||0) : snap.counts.pending_merch} color="#d97706" />
         )}
         <div style={{ flex: 1 }} />
-        <button onClick={() => openManualCarga(isRefriTab ? "refrigerado" : "ambiente")} style={QS.addLoaderBtn} title="Añadir carga fuera del plan">
+        <button onClick={() => openManualCarga(isRefriTab ? "refrigerado" : "ambiente")} style={QS.odbcBtn} title="Añadir carga fuera del plan">
           + Carga manual
         </button>
         <button onClick={refresh} style={QS.refreshBtn} title="Refrescar">
@@ -320,12 +330,6 @@ const QueuePanel = ({ pushToast }) => {
             Vaciar cola {isRefriTab ? "refri" : "ambiente"}
           </button>
         )}
-        {snap.counts.done > 0 && (
-          <button onClick={handleResetDone} style={{ ...QS.clearBtn, marginLeft: 4 }} title="Limpiar histórico">
-            <IconTrash size={13} />
-            Limpiar histórico
-          </button>
-        )}
       </div>
 
       {/* ─── Tabs ─── */}
@@ -349,6 +353,15 @@ const QueuePanel = ({ pushToast }) => {
           )}
         </button>
         <button
+          onClick={() => setActiveTab("cola_con")}
+          style={{ ...QS.tab, ...(activeTab === "cola_con" ? { ...QS.tabActive, borderBottomColor: "#7c3aed", color: "#4c1d95" } : {}) }}
+        >
+          ❄❄ Cola conge
+          {((snap.counts.queued_con || 0) + (snap.counts.pending_merch_con || 0)) > 0 && (
+            <span style={{ ...QS.tabBadge, background: "#ede9fe", color: "#4c1d95" }}>{(snap.counts.queued_con || 0) + (snap.counts.pending_merch_con || 0)}</span>
+          )}
+        </button>
+        <button
           onClick={() => { setActiveTab("actividad"); fetchAuditLog(); }}
           style={{ ...QS.tab, ...(activeTab === "actividad" ? QS.tabActive : {}) }}
         >
@@ -357,7 +370,7 @@ const QueuePanel = ({ pushToast }) => {
       </div>
 
       {/* ─── Buscador (en tabs de cola) ─── */}
-      {(activeTab === "cola" || activeTab === "cola_refri") && (
+      {(activeTab === "cola" || activeTab === "cola_refri" || activeTab === "cola_con") && (
         <div style={QS.searchBar}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -405,6 +418,7 @@ const QueuePanel = ({ pushToast }) => {
                   onOpenReassign={() => setReassignFor(reassignFor === it.id ? null : it.id)}
                   onSendToPendingMerch={() => handleSendToPendingMerch(it.id)}
                   onSetComment={(text) => handleSetComment(it.id, text)}
+                  onSetTrafficComment={(text) => handleSetTrafficComment(it.id, text)}
                   onSetSupervisorFiles={(files) => handleSetSupervisorFiles(it.id, files)}
                   onChangeQueueType={(t) => handleChangeQueueType(it.id, t)}
                 />
@@ -542,6 +556,7 @@ const QueuePanel = ({ pushToast }) => {
                   onOpenReassign={() => setReassignFor(reassignFor === it.id ? null : it.id)}
                   onSendToPendingMerch={() => handleSendToPendingMerch(it.id)}
                   onSetComment={(text) => handleSetComment(it.id, text)}
+                  onSetTrafficComment={(text) => handleSetTrafficComment(it.id, text)}
                   onSetSupervisorFiles={(files) => handleSetSupervisorFiles(it.id, files)}
                   onChangeQueueType={(t) => handleChangeQueueType(it.id, t)}
                 />
@@ -637,6 +652,101 @@ const QueuePanel = ({ pushToast }) => {
                 </div>
                 <div style={QS.list}>
                   {[...snap.done].filter(it => it.queue_type === "refrigerado").slice(0, 10).map(it => (
+                    <DoneCard key={it.id} item={it} loader={loaderById(it.assigned_to)} />
+                  ))}
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+      )}
+
+      {/* ─── Tab: Cola congelado ─── */}
+      {activeTab === "cola_con" && (
+        <div style={{ ...QS.grid, gridTemplateColumns: isTablet ? "1fr" : "1fr 1fr 1fr", overflowY: isTablet ? "auto" : "hidden" }}>
+          <section style={QS.col}>
+            <div style={QS.colHead}>
+              <span style={QS.colTitle}>❄❄ Cola</span>
+              <span style={QS.colCount}>{(snap.queued_con||[]).length + pendingMerchCon.length}</span>
+            </div>
+            <div style={QS.list}>
+              {(snap.queued_con||[]).filter(matchesSearch).length === 0 && pendingGroupsCon.length === 0 && (
+                <EmptyMini label={search ? "Sin resultados" : "Sin cargas congeladas en cola"} hint={search ? `No coincide con "${search}"` : "Se añaden al encolar una carga congelada"} />
+              )}
+              {(snap.queued_con||[]).filter(matchesSearch).map((it, i) => (
+                <QueueCard key={it.id} item={it} position={i + 1} loaders={snap.loaders}
+                  onToggleUrgent={() => handleUrgent(it.id, it.urgente)}
+                  onToggleBlock={() => handleToggleBlock(it.id, it.blocked)}
+                  onRemove={() => handleRemove(it.id)}
+                  onReassign={(loaderId) => handleReassign(it.id, loaderId)}
+                  showReassignMenu={reassignFor === it.id}
+                  onOpenReassign={() => setReassignFor(reassignFor === it.id ? null : it.id)}
+                  onSendToPendingMerch={() => handleSendToPendingMerch(it.id)}
+                  onSetComment={(text) => handleSetComment(it.id, text)}
+                  onSetTrafficComment={(text) => handleSetTrafficComment(it.id, text)}
+                  onSetSupervisorFiles={(files) => handleSetSupervisorFiles(it.id, files)}
+                  onChangeQueueType={(t) => handleChangeQueueType(it.id, t)}
+                />
+              ))}
+              {pendingGroupsCon.map((group) => {
+                const combinedCount = group[0].combined_count ?? group.reduce((s, it) => s + (it.numsup_count || 0), 0);
+                const isCombo = group.length > 1 || group[0].is_combined;
+                return (
+                  <div key={group[0].viaje_n || group[0].id} style={{ ...QS.card, borderLeft: "3px solid #dc2626", background: "#fff5f5", padding: "6px 9px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, background: "#fecaca", color: "#dc2626", padding: "2px 6px", borderRadius: 999, flexShrink: 0 }}>SIN MERCH</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#1c1917" }}>{group.map((it) => it.destino).join(" + ")}</div>
+                        <div style={{ fontSize: 10, color: "#78716c" }}>Nº {group[0].viaje_n} · {combinedCount}/{group[0].merch_threshold ?? 25} pales{isCombo && <span style={{ marginLeft: 4, fontWeight: 700, color: "#7c3aed" }}>· COMB</span>}</div>
+                      </div>
+                      <button onClick={() => { if (confirm("¿Priorizar aunque falte mercancía?")) handleForceQueued(group[0].id); }} style={{ fontSize: 11, padding: "3px 8px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, flexShrink: 0 }}>↑ Priorizar</button>
+                      <button onClick={() => handleRemove(group[0].id)} style={{ fontSize: 11, padding: "3px 7px", background: "#fff", border: "1px solid #fecaca", borderRadius: 4, color: "#dc2626", cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>✕</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+          <section style={QS.col}>
+            <div style={QS.colHead}>
+              <span style={QS.colTitle}>❄❄ En curso</span>
+              <span style={QS.colCount}>{(snap.assigned_con||[]).length}</span>
+            </div>
+            <div style={QS.list}>
+              {(snap.assigned_con||[]).length === 0 ? (
+                <EmptyMini label="Ninguna carga congelada en curso" hint="Cuando un cargador conge pida una carga aparecerá aquí" />
+              ) : (snap.assigned_con||[]).map((it) => (
+                <AssignedCard key={it.id} item={it} loader={loaderById(it.assigned_to)} helper={it.helper_id ? loaderById(it.helper_id) : null} loaders={snap.loaders}
+                  onReassign={(loaderId) => handleReassign(it.id, loaderId)} onRemove={() => handleRemove(it.id)}
+                  showReassignMenu={reassignFor === it.id} onOpenReassign={() => setReassignFor(reassignFor === it.id ? null : it.id)}
+                  onAssignHelper={(loaderId) => handleAssignHelper(it.id, loaderId)} onRemoveHelper={() => handleRemoveHelper(it.id)}
+                  showHelperMenu={helperMenuFor === it.id} onOpenHelperMenu={() => setHelperMenuFor(helperMenuFor === it.id ? null : it.id)}
+                  onChangeQueueType={(t) => handleChangeQueueType(it.id, t)}
+                />
+              ))}
+            </div>
+          </section>
+          <section style={QS.col}>
+            <div style={QS.colHead}>
+              <span style={QS.colTitle}>❄❄ Cargadores conge</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={QS.colCount}>{conLoaders.filter(l => l.active).length}</span>
+                <button onClick={() => openNewLoader("congelado")} style={{ ...QS.addLoaderBtn, background: "#ede9fe", color: "#4c1d95", borderColor: "#ddd6fe" }} title="Añadir cargador congelado">+ Cargador</button>
+              </div>
+            </div>
+            <div style={QS.list}>
+              {conLoaders.length === 0 ? (
+                <EmptyMini label="Sin cargadores conge" hint='Pulsa "+ Cargador" para añadir un cargador de congelado' />
+              ) : conLoaders.map((l) => {
+                const current = (snap.assigned_con||[]).find(a => a.assigned_to === l.id || a.helper_id === l.id);
+                return <LoaderCard key={l.id} loader={l} current={current} onEdit={() => openEditLoader(l)} onRemove={() => handleRemoveLoader(l.id)} />;
+              })}
+            </div>
+            {snap.done.filter(it => it.queue_type === "congelado").length > 0 && (
+              <>
+                <div style={{ ...QS.colHead, marginTop: 18 }}><span style={QS.colTitle}>Últimas completadas</span></div>
+                <div style={QS.list}>
+                  {[...snap.done].filter(it => it.queue_type === "congelado").slice(0, 10).map(it => (
                     <DoneCard key={it.id} item={it} loader={loaderById(it.assigned_to)} />
                   ))}
                 </div>
@@ -914,6 +1024,7 @@ const MANUAL_PLACEHOLDER_CSS = `
 const ManualCargaModal = ({ form, onChange, onSave, onClose }) => {
   const set = (k, v) => onChange({ ...form, [k]: v });
   const isRefri = form.queue_type === "refrigerado";
+  const isCon   = form.queue_type === "congelado";
   const labelStyle = MANUAL_LABEL_STYLE;
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -927,18 +1038,22 @@ const ManualCargaModal = ({ form, onChange, onSave, onClose }) => {
         </div>
         {/* Formulario */}
         <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: 14, overflowY: "auto" }}>
-          {/* Tipo ☼/❄ */}
+          {/* Tipo ☼/❄/❄❄ */}
           <div>
             <div style={{ ...labelStyle, marginBottom: 8 }}>Tipo de cola</div>
             <div style={{ display: "flex", gap: 8 }}>
               <button
                 onClick={() => set("queue_type", "ambiente")}
-                style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: `2px solid ${!isRefri ? "#f97316" : "#e7e5e4"}`, background: !isRefri ? "#fff7ed" : "#fafaf9", color: !isRefri ? "#9a3412" : "#78716c", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}
+                style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: `2px solid ${!isRefri && !isCon ? "#f97316" : "#e7e5e4"}`, background: !isRefri && !isCon ? "#fff7ed" : "#fafaf9", color: !isRefri && !isCon ? "#9a3412" : "#78716c", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}
               >☼ AMBIENTE</button>
               <button
                 onClick={() => set("queue_type", "refrigerado")}
                 style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: `2px solid ${isRefri ? "#0ea5e9" : "#e7e5e4"}`, background: isRefri ? "#dbeafe" : "#fafaf9", color: isRefri ? "#0c4a6e" : "#78716c", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}
-              >❄ REFRIGERADO</button>
+              >❄ REFRI</button>
+              <button
+                onClick={() => set("queue_type", "congelado")}
+                style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: `2px solid ${isCon ? "#7c3aed" : "#e7e5e4"}`, background: isCon ? "#ede9fe" : "#fafaf9", color: isCon ? "#4c1d95" : "#78716c", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}
+              >❄❄ CONGE</button>
             </div>
           </div>
 
@@ -1003,9 +1118,11 @@ const ComboBadge = () => (
   </span>
 );
 
-const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onRemove, onReassign, showReassignMenu, onOpenReassign, onSendToPendingMerch, onSetComment, onSetSupervisorFiles, onChangeQueueType }) => {
+const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onRemove, onReassign, showReassignMenu, onOpenReassign, onSendToPendingMerch, onSetComment, onSetTrafficComment, onSetSupervisorFiles, onChangeQueueType }) => {
   const [showCommentInput, setShowCommentInput] = React.useState(false);
   const [commentDraft, setCommentDraft] = React.useState(item.comment || "");
+  const [showTrafficInput, setShowTrafficInput] = React.useState(false);
+  const [trafficDraft, setTrafficDraft] = React.useState(item.traffic_comment || "");
   const [loaderSearch, setLoaderSearch] = React.useState("");
   const saveComment = () => { onSetComment(commentDraft.trim()); setShowCommentInput(false); };
   const attachRef = React.useRef(null);
@@ -1079,13 +1196,22 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onR
           style={{ ...QS.iconBtn, color: item.comment ? "#0ea5e9" : "#a8a29e" }}>
           💬
         </button>
+        {onSetTrafficComment && (
+          <button onClick={() => setShowTrafficInput((v) => !v)} title="Comentario de tráfico (urgencia)"
+            style={{ ...QS.iconBtn, color: item.traffic_comment ? "#7c3aed" : "#a8a29e", fontSize: 12 }}>
+            🚦
+          </button>
+        )}
         {onChangeQueueType && (
           <button
-            onClick={() => onChangeQueueType(item.queue_type === "refrigerado" ? "ambiente" : "refrigerado")}
-            title={item.queue_type === "refrigerado" ? "Mover a cola ambiente ☼" : "Mover a cola refrigerado ❄"}
-            style={{ ...QS.iconBtn, fontSize: 12, color: item.queue_type === "refrigerado" ? "#9a3412" : "#0c4a6e" }}
+            onClick={() => {
+              const next = item.queue_type === "ambiente" ? "refrigerado" : item.queue_type === "refrigerado" ? "congelado" : "ambiente";
+              onChangeQueueType(next);
+            }}
+            title="Cambiar tipo de cola"
+            style={{ ...QS.iconBtn, fontSize: 12, color: item.queue_type === "refrigerado" ? "#0c4a6e" : item.queue_type === "congelado" ? "#4c1d95" : "#9a3412" }}
           >
-            {item.queue_type === "refrigerado" ? "☼" : "❄"}
+            {item.queue_type === "refrigerado" ? "❄" : item.queue_type === "congelado" ? "❄❄" : "☼"}
           </button>
         )}
         <button onClick={onRemove} title="Quitar de cola"
@@ -1100,10 +1226,10 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onR
         <span style={QS.cardDestino}>{item.destino}</span>
         <span style={{
           ...QS.tipoBadge,
-          background: item.tipo_carga === "REFRIGERADO" ? "#dbeafe" : "#ffedd5",
-          color: item.tipo_carga === "REFRIGERADO" ? "#0c4a6e" : "#9a3412",
+          background: item.tipo_carga === "CONGELADO" ? "#ede9fe" : item.tipo_carga === "REFRIGERADO" ? "#dbeafe" : "#ffedd5",
+          color: item.tipo_carga === "CONGELADO" ? "#4c1d95" : item.tipo_carga === "REFRIGERADO" ? "#0c4a6e" : "#9a3412",
         }}>
-          {item.tipo_carga === "REFRIGERADO" ? "❄" : "☼"}
+          {item.tipo_carga === "CONGELADO" ? "❄❄" : item.tipo_carga === "REFRIGERADO" ? "❄" : "☼"}
         </span>
       </div>
       {/* Centros del viaje combinado */}
@@ -1113,16 +1239,26 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onR
         </div>
       )}
       <div style={QS.cardMeta}>
-        <Meta label="Muelle" value={(item.muelle || "—").padStart(2, "0")} />
-        <Meta label="Playa" value={item.playa || "—"} />
-        <Meta label="Salida" value={item.hora_salida || "—"} />
-        <Meta label="Camión" value={(item.cam || "—").toString()} />
+        {item.source === "manual" ? (
+          <>
+            {item.ruta && <Meta label="Ruta" value={item.ruta} />}
+            {item.pallets && <Meta label="Pallets" value={item.pallets} />}
+            {item.muelle && <Meta label="Muelle" value={(item.muelle || "—").padStart(2, "0")} />}
+          </>
+        ) : (
+          <>
+            <Meta label="Muelle" value={(item.muelle || "—").padStart(2, "0")} />
+            <Meta label="Playa" value={item.playa || "—"} />
+            <Meta label="Salida" value={item.hora_salida || "—"} />
+            <Meta label="Camión" value={(item.cam || "—").toString()} />
+          </>
+        )}
         {item.cod_centro && <Meta label="Cliente" value={item.cod_centro} />}
-        {(item.combined_count != null || item.numsup_count != null) && (
-          <Meta
-            label="Pales"
-            value={`${item.combined_count ?? item.numsup_count} / ${item.merch_threshold ?? 25}`}
-          />
+        {item.numsup_count != null && (
+          <Meta label="Soportes" value={`${item.numsup_count} / ${item.merch_threshold ?? 25}`} />
+        )}
+        {item.combined_count != null && item.numsup_count == null && (
+          <Meta label="Pales" value={`${item.combined_count} / ${item.merch_threshold ?? 25}`} />
         )}
       </div>
       <div style={QS.cardTractora}>{item.tractora}</div>
@@ -1152,6 +1288,32 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onR
           <button onClick={saveComment} style={QS.commentSaveBtn}>Guardar</button>
           <button onClick={() => { setCommentDraft(item.comment || ""); setShowCommentInput(false); }} style={QS.commentCancelBtn}>Cancelar</button>
           {item.comment && <button onClick={() => { setCommentDraft(""); onSetComment(""); setShowCommentInput(false); }} style={{ ...QS.commentCancelBtn, color: "#dc2626" }}>Borrar</button>}
+        </div>
+      </div>
+    )}
+
+    {/* Nota de tráfico (morado) */}
+    {item.traffic_comment && !showTrafficInput && (
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "5px 8px", background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: 5, marginTop: 4 }}>
+        <span style={{ fontSize: 11, color: "#7c3aed" }}>🚦</span>
+        <span style={{ flex: 1, fontSize: 11.5, color: "#4c1d95" }}>{item.traffic_comment}</span>
+        <button onClick={() => setShowTrafficInput(true)} style={{ fontSize: 10, color: "#7c3aed", background: "none", border: "none", cursor: "pointer", padding: 0 }}>editar</button>
+      </div>
+    )}
+    {showTrafficInput && (
+      <div style={{ ...QS.commentInputWrap, borderColor: "#e9d5ff", background: "#faf5ff" }}>
+        <textarea
+          value={trafficDraft}
+          onChange={(e) => setTrafficDraft(e.target.value)}
+          placeholder="Comentario de tráfico (urgencia, instrucciones especiales)…"
+          rows={2}
+          autoFocus
+          style={{ ...QS.commentTextarea, borderColor: "#e9d5ff" }}
+        />
+        <div style={{ display: "flex", gap: 6, marginTop: 5 }}>
+          <button onClick={() => { onSetTrafficComment(trafficDraft.trim()); setShowTrafficInput(false); }} style={{ ...QS.commentSaveBtn, background: "#7c3aed" }}>Guardar</button>
+          <button onClick={() => { setTrafficDraft(item.traffic_comment || ""); setShowTrafficInput(false); }} style={QS.commentCancelBtn}>Cancelar</button>
+          {item.traffic_comment && <button onClick={() => { setTrafficDraft(""); onSetTrafficComment(""); setShowTrafficInput(false); }} style={{ ...QS.commentCancelBtn, color: "#dc2626" }}>Borrar</button>}
         </div>
       </div>
     )}

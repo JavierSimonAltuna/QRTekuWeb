@@ -345,7 +345,7 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
   const [checklist, setChecklist] = useState(() =>
     Object.fromEntries(CHECKLIST_ITEMS.map(({ key }) => [
       key,
-      key === "puertas" || key === "apto_alimentaria" ? true : false,
+      key === "puertas" || key === "apto_alimentaria" || key === "temperatura" ? true : false,
     ]))
   );
   const toggleCheck = (key, val) => setChecklist(prev => ({ ...prev, [key]: val }));
@@ -705,9 +705,15 @@ const AssignedScreen = ({ item, queuedCount, loader, onFinalize, onRefreshPrecin
       </div>
 
       {/* ─── Botón finalizar (fijo) ─── */}
+      {item.source === "manual" && !item.load_start_at && (
+        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#fef3c7", borderTop: "2px solid #f59e0b", padding: "10px 16px", textAlign: "center", fontSize: 13, color: "#92400e", zIndex: 200 }}>
+          Registra el <strong>Inicio de Carga</strong> antes de finalizar
+        </div>
+      )}
       <button
         onClick={() => onFinalize(checklist, photos)}
-        style={{ ...LS.finalizeBtn }}
+        disabled={item.source === "manual" && !item.load_start_at}
+        style={{ ...LS.finalizeBtn, ...(item.source === "manual" && !item.load_start_at ? { opacity: 0.4, cursor: "not-allowed" } : {}) }}
       >
         <span style={{ fontSize: 17, fontWeight: 700 }}>✓</span>
         <span>FINALIZAR CARGA</span>
