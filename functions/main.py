@@ -214,59 +214,279 @@ def _loader_remove(loader_id: str):
 
 # ── Cargas (Excel) en Firestore ────────────────────────────────────────────
 
-def _safe_cell(v) -> str:
-    """Convierte cualquier valor de celda openpyxl a string seguro para Firestore."""
+def _safe_str(v) -> str:
+    """Convierte cualquier valor de celda a string limpio."""
     if v is None:
         return ""
     import datetime as _dt
     if isinstance(v, (_dt.datetime, _dt.date)):
-        return v.isoformat()
+        return str(v)
     if isinstance(v, _dt.timedelta):
         total = int(v.total_seconds())
         h, rem = divmod(abs(total), 3600)
         return f"{h:02d}:{rem // 60:02d}"
     if isinstance(v, bool):
-        return "1" if v else "0"
+        return ""
     if isinstance(v, float):
         if v != v:  # NaN
             return ""
-        return str(int(v)) if v == int(v) else str(v)
+        if v == int(v):
+            return str(int(v))
+        return str(v)
     if isinstance(v, int):
         return str(v)
-    return str(v).strip()
+    s = str(v).strip()
+    return "" if s.lower() in ("nan", "none") else s
 
 
-def _parse_excel_bytes(data: bytes, filename: str) -> list:
-    """Parsea un Excel y devuelve las filas."""
+def _norm_hora(v) -> str:
+    """Convierte valor de hora Excel a HH:MM."""
+    import datetime as _dt
+    if v is None:
+        return ""
+    if isinstance(v, _dt.timedelta):
+        total = int(v.total_seconds())
+        h, rem = divmod(abs(total), 3600)
+        return f"{h:02d}:{rem // 60:02d}"
+    if isinstance(v, (_dt.datetime, _dt.time)):
+        return v.strftime("%H:%M")
+    s = _safe_str(v).strip()
+    if s in ("0", "0.0", "0.00", ""):
+        return ""
+    if ":" in s:
+        parts = s.split(":")
+        try:
+            return f"{int(parts[0]):02d}:{int(parts[1]):02d}"
+        except Exception:
+            return ""
+    try:
+        f = float(s)
+        if f == 0:
+            return ""
+        total = round(f * 86400)
+        h, rem = divmod(total, 3600)
+        return f"{h % 24:02d}:{rem // 60:02d}"
+    except Exception:
+        return s
+
+
+def _nc(s: str) -> str:
+    """Normaliza nombre de columna para comparar."""
+    return str(s).upper().replace("\n","").replace("\r","").replace(" ","").replace("\t","")
+
+
+def _parse_excel_bytes(data: bytes, filename: str) -> tuple:
+    """
+    Parsea el Plan de Carga Excel siguiendo la misma lógica que qr_teku_core.py.
+    Devuelve (rows, fecha_b2).
+    """
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
     ws = wb.active
-    raw_headers = [str(c.value or "").strip() for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    all_rows = list(ws.iter_rows(values_only=True))
+
+    # ── Fecha B2 ──────────────────────────────────────────────────────────
+    fecha_b2 = ""
+    try:
+        v = all_rows[1][1] if len(all_rows) > 1 and len(all_rows[1]) > 1 else None
+        if v is not None:
+            import datetime as _dt
+            if isinstance(v, (_dt.datetime, _dt.date)):
+                fecha_b2 = v.strftime("%Y%m%d")
+            else:
+                s = _safe_str(v)
+                if s and s.replace("-","").isdigit():
+                    fecha_b2 = s.replace("-","")
+                elif s:
+                    fecha_b2 = s
+    except Exception:
+        pass
+
+    # ── Fila de cabecera (primera que contiene "DESTINO") ─────────────────
+    hdr_idx = 0
+    for i, row in enumerate(all_rows[:50]):
+        vals = [_nc(str(v or "")) for v in row]
+        if "DESTINO" in vals:
+            hdr_idx = i
+            break
+
+    raw_hdr = [str(v or "").strip() for v in all_rows[hdr_idx]]
+
+    # Hacer únicos los nombres de columna
+    seen_h: dict = {}
+    headers = []
+    for h in raw_hdr:
+        if h in seen_h:
+            seen_h[h] += 1
+            headers.append(f"{h}_{seen_h[h]}")
+        else:
+            seen_h[h] = 0
+            headers.append(h)
+
+    n_cols = len(headers)
+
+    def col_idx(name: str):
+        nc = _nc(name)
+        for i, h in enumerate(headers):
+            if _nc(h) == nc:
+                return i
+        return None
+
+    def rget(row, name: str, fallback_idx: int = None):
+        idx = col_idx(name)
+        if idx is not None and idx < len(row):
+            return row[idx]
+        if fallback_idx is not None and fallback_idx < len(row):
+            return row[fallback_idx]
+        return None
+
+    # ── Detectar columnas por pre-cabecera ────────────────────────────────
+    _salida_prev_idx = None
+    _cod_centro_idx = None
+    if hdr_idx > 0:
+        for ci in range(n_cols):
+            pre = " ".join(
+                _nc(str(all_rows[ri][ci] or ""))
+                for ri in range(hdr_idx)
+                if ci < len(all_rows[ri]) and _safe_str(all_rows[ri][ci])
+            )
+            if _salida_prev_idx is None and "SALIDA" in pre and "PREV" in pre:
+                _salida_prev_idx = ci
+            if _cod_centro_idx is None and "COD" in pre and "CENTRO" in pre:
+                _cod_centro_idx = ci
+    if _salida_prev_idx is None and n_cols > 27:
+        _salida_prev_idx = 27
+    if _cod_centro_idx is None and n_cols > 20:
+        _cod_centro_idx = 20
+
+    # ── Columna precinto ──────────────────────────────────────────────────
+    precinto_col_idx = None
+    for i, h in enumerate(headers):
+        if "PRECINTO" in _nc(h):
+            precinto_col_idx = i
+            break
+    if precinto_col_idx is None and n_cols > 30:
+        precinto_col_idx = 30
+
+    TIPOS_AMBIENTE = {"1", "2", "3"}
+
+    # ── Parsear filas de datos ────────────────────────────────────────────
     rows = []
-    for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=1):
-        if all(v is None for v in row):
-            continue  # fila vacía
-        r = {"n": str(i)}
-        for h, v in zip(raw_headers, row):
-            if h:  # ignorar columnas sin cabecera
-                r[h] = _safe_cell(v)
-        # Normalizar campos clave (alias minúsculas)
-        r["ruta"] = r.get("ruta") or r.get("RUTA") or r.get("Ruta") or ""
-        r["muelle"] = r.get("muelle") or r.get("MUELLE") or r.get("Muelle") or ""
-        r["playa"] = r.get("playa") or r.get("PLAYA") or r.get("Playa") or ""
-        r["hora_salida"] = r.get("hora_salida") or r.get("SALIDA") or ""
-        r["cam"] = r.get("cam") or r.get("CAMION") or r.get("Camion") or ""
-        r["codcli"] = r.get("codcli") or r.get("CODCLI") or r.get("CodCli") or ""
-        r["agencia"] = r.get("agencia") or r.get("AGENCIA") or r.get("Agencia") or ""
-        r["estado"] = "pendiente"
-        rows.append(r)
-    return rows
+    for raw_row in all_rows[hdr_idx + 1:]:
+        if all(v is None for v in raw_row):
+            continue
+
+        destino   = _safe_str(rget(raw_row, "DESTINO"))
+        n         = _safe_str(rget(raw_row, "Nº") or rget(raw_row, "N°"))
+        agencia   = _safe_str(rget(raw_row, "AGENCIA CONTRATADA"))
+        matriculas = _safe_str(rget(raw_row, "MATRICULAS"))
+        tipo      = _safe_str(rget(raw_row, "TIPO CAMION"))
+        expedicion = _safe_str(rget(raw_row, "EXPEDICION"))
+        cad       = _safe_str(rget(raw_row, "C.A.D"))
+        orden     = _safe_str(rget(raw_row, "ORDEN CARGA OPERADOR"))
+
+        # PLAYA col K (idx 10) y MUELLE col L (idx 11)
+        playa = ""
+        muelle = ""
+        for i, h in enumerate(headers):
+            nc = _nc(h)
+            if not playa and nc == "PLAYA":
+                playa = _safe_str(raw_row[i] if i < len(raw_row) else None)
+            if not muelle and nc == "MUELLE":
+                muelle = _safe_str(raw_row[i] if i < len(raw_row) else None)
+        if not playa and n_cols > 10:
+            playa = _safe_str(raw_row[10] if 10 < len(raw_row) else None)
+        if not muelle and n_cols > 11:
+            muelle = _safe_str(raw_row[11] if 11 < len(raw_row) else None)
+
+        # HORA ACULE (col AA = idx 26)
+        hora_acule = ""
+        for i, h in enumerate(headers):
+            if "ACULE" in _nc(h):
+                v = raw_row[i] if i < len(raw_row) else None
+                if _safe_str(v) not in ("0.0","0","0.00","","nan","none",""):
+                    hora_acule = _norm_hora(v)
+                break
+        if not hora_acule and n_cols > 26:
+            v = raw_row[26] if 26 < len(raw_row) else None
+            if _safe_str(v) not in ("0.0","0","0.00","","nan","none",""):
+                hora_acule = _norm_hora(v)
+        aculado = bool(hora_acule.strip())
+
+        # HORA SALIDA PREVISTA
+        hora_salida = ""
+        if _salida_prev_idx is not None and _salida_prev_idx < len(raw_row):
+            v = raw_row[_salida_prev_idx]
+            if _safe_str(v) not in ("0.0","0","0.00","","nan","none",""):
+                hora_salida = _norm_hora(v)
+        if not hora_salida:
+            for i, h in enumerate(headers):
+                nc = _nc(h)
+                if "SALIDAPREV" in nc or "SALIDA_PREV" in nc or "HORASALIDA" in nc:
+                    v = raw_row[i] if i < len(raw_row) else None
+                    hora_salida = _norm_hora(v)
+                    if hora_salida:
+                        break
+
+        # COD. CENTRO
+        cod_centro = ""
+        if _cod_centro_idx is not None and _cod_centro_idx < len(raw_row):
+            cod_centro = _safe_str(raw_row[_cod_centro_idx])
+        if not cod_centro:
+            for i, h in enumerate(headers):
+                nc = _nc(h).replace(".","")
+                if "CODCENTRO" in nc or "CODCENT" in nc:
+                    cod_centro = _safe_str(raw_row[i] if i < len(raw_row) else None)
+                    if cod_centro:
+                        break
+
+        # TIPO VIAJE
+        tipo_viaje = "ambiente" if tipo.strip() in TIPOS_AMBIENTE else "refrigerado"
+        if "CONGELADO" in tipo.upper() or "CONG" in tipo.upper():
+            tipo_viaje = "congelado"
+
+        # PRECINTO (texto plano — no como lista para evitar nested arrays en Firestore)
+        precinto = ""
+        if precinto_col_idx is not None and precinto_col_idx < len(raw_row):
+            precinto = _safe_str(raw_row[precinto_col_idx])
+
+        # COL I (idx 8) y COL W (idx 22)
+        col_i = _safe_str(raw_row[8] if n_cols > 8 and 8 < len(raw_row) else None)
+        col_w = _safe_str(raw_row[22] if n_cols > 22 and 22 < len(raw_row) else None).upper()
+
+        if not destino and not n:
+            continue
+
+        rows.append({
+            "destino": destino, "n": n, "agencia": agencia,
+            "matriculas": matriculas, "tipo": tipo,
+            "expedicion": expedicion, "cad": cad, "orden": orden,
+            "playa": playa, "muelle": muelle,
+            "hora_acule": hora_acule, "aculado": aculado,
+            "hora_salida": hora_salida,
+            "cod_centro": cod_centro, "col_w": col_w, "col_i": col_i,
+            "tipo_viaje": tipo_viaje, "precinto": precinto,
+            "ya_cargado": False,
+            "estado": "ready" if destino else "missing-cif",
+        })
+
+    # Deduplicar por (destino, n)
+    seen_n: set = set()
+    deduped = []
+    for row in rows:
+        key = (row["destino"], row["n"])
+        if row["n"] and key in seen_n:
+            continue
+        seen_n.add(key)
+        deduped.append(row)
+
+    return deduped, fecha_b2
 
 
 def _load_excel_base64(filename: str, b64_content: str):
     try:
         data = base64.b64decode(b64_content)
-        rows = _parse_excel_bytes(data, filename)
+        rows, fecha_b2 = _parse_excel_bytes(data, filename)
         session_id = f"session-{_now_iso()[:19].replace(':','-').replace('T','_')}"
         now = _now_iso()
         fs_error = None
@@ -305,10 +525,16 @@ def _load_excel_base64(filename: str, b64_content: str):
                 ] for it in lst
             }
             for row in rows:
-                ruta = str(row.get("ruta") or "").strip()
-                if not ruta or ruta in existing_ids:
+                n_viaje = str(row.get("n") or "").strip()
+                destino = str(row.get("destino") or "").strip()
+                if not n_viaje and not destino:
                     continue
-                Q.enqueue_manual(row, urgente=False)
+                key = n_viaje or destino
+                if key in existing_ids:
+                    continue
+                # Usar tipo_viaje del row para queue_type
+                row_with_qt = {**row, "queue_type": row.get("tipo_viaje", "ambiente")}
+                Q.enqueue_manual(row_with_qt, urgente=False)
                 auto_count += 1
         except Exception as e:
             print(f"[pulso] Auto-enqueue error: {e}")
@@ -316,7 +542,7 @@ def _load_excel_base64(filename: str, b64_content: str):
         result = {
             "ok": True, "rows": rows, "filename": filename,
             "count": len(rows), "auto_enqueued": auto_count,
-            "session_id": session_id,
+            "session_id": session_id, "fecha_b2": fecha_b2,
         }
         if fs_error:
             result["warning"] = f"Datos cargados pero no persistidos: {fs_error}"
