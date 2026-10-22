@@ -48,6 +48,8 @@ const QRTekuApp = () => {
   const [showGraphModal, setShowGraphModal] = useState(false);
   const [showGraphPicker, setShowGraphPicker] = useState(false);
   const [graphConfigured, setGraphConfigured] = useState(false);
+  const [showApiModal, setShowApiModal] = useState(false);
+  const [apiConfigured, setApiConfigured] = useState(false);
   const [view, setView] = useState("cargas");  // 'cargas' | 'cola'
   const [queueCounts, setQueueCounts] = useState({ queued: 0, assigned: 0, done: 0 });
   const [excelSessions, setExcelSessions] = useState([]);
@@ -236,6 +238,13 @@ const QRTekuApp = () => {
   useEffect(() => {
     window.api.call("graph_get_config").then(r => {
       if (r && r.ok) setGraphConfigured(r.configured);
+    }).catch(() => {});
+  }, []);
+
+  // ── Estado API Backend ────────────────────────────────────────────────
+  useEffect(() => {
+    window.api.call("get_api_config").then(r => {
+      if (r && r.ok) setApiConfigured(r.configured);
     }).catch(() => {});
   }, []);
 
@@ -850,6 +859,22 @@ const QRTekuApp = () => {
           <TweakToggle label="Mostrar JSON"     value={tw.showJsonPanel}  onChange={(v) => setTweak("showJsonPanel", v)} />
           <TweakToggle label="Auto-recargar Excel (5s)"  value={tw.autoRefresh}    onChange={(v) => setTweak("autoRefresh", v)} />
         </TweakSection>
+        <TweakSection label="API Backend (AS400)">
+          <div style={{ padding: "6px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: apiConfigured ? "#22c55e" : "#f59e0b", flexShrink: 0 }} />
+              <span style={{ fontSize: 12, color: apiConfigured ? "#15803d" : "#b45309" }}>
+                {apiConfigured ? "API conectada" : "Sin configurar"}
+              </span>
+            </div>
+            <button
+              onClick={() => setShowApiModal(true)}
+              style={{ fontSize: 12, fontWeight: 600, padding: "5px 12px", borderRadius: 6, border: "1px solid #d6d3d1", background: "#fff", cursor: "pointer", color: "#1c1917", fontFamily: "inherit" }}
+            >
+              Configurar API…
+            </button>
+          </div>
+        </TweakSection>
         <TweakSection label="Microsoft 365">
           <div style={{ padding: "6px 0" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
@@ -867,6 +892,15 @@ const QRTekuApp = () => {
           </div>
         </TweakSection>
       </TweaksPanel>
+
+      {/* Modal API Backend config */}
+      {showApiModal && (
+        <ApiConfigModal
+          onClose={() => setShowApiModal(false)}
+          onSaved={(configured) => setApiConfigured(configured)}
+          pushToast={pushToast}
+        />
+      )}
 
       {/* Modal Graph / SharePoint config */}
       {showGraphModal && (
@@ -1374,3 +1408,96 @@ const S = {
 };
 
 window.QRTekuApp = QRTekuApp;
+
+// ───────────────────────────────────────────────────────────────────
+// Modal configuración API Backend (AS400)
+// ───────────────────────────────────────────────────────────────────
+const ApiConfigModal = ({ onClose, onSaved, pushToast }) => {
+  const [form, setForm] = React.useState({ api_url: "", api_token: "" });
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [testing, setTesting] = React.useState(false);
+
+  React.useEffect(() => {
+    window.api.call("get_api_config").then(r => {
+      if (r && r.ok) setForm({ api_url: r.api_url || "", api_token: r.api_token || "" });
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const r = await window.api.call("save_api_config", form.api_url, form.api_token);
+      if (r.ok) {
+        pushToast("Configuración guardada", "success");
+        const r2 = await window.api.call("get_api_config");
+        onSaved(r2?.configured || false);
+        onClose();
+      } else {
+        pushToast(r.error || "Error al guardar", "error");
+      }
+    } finally { setSaving(false); }
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    try {
+      const r = await window.api.call("get_odbc_diagnostics");
+      if (r && r.connected) pushToast("✓ API conectada correctamente", "success");
+      else pushToast("No se pudo conectar — revisa URL y token", "error");
+    } finally { setTesting(false); }
+  };
+
+  const overlay = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" };
+  const box = { background: "#fff", borderRadius: 14, padding: "28px 32px", width: 460, maxWidth: "94vw", boxShadow: "0 20px 60px rgba(0,0,0,0.25)" };
+  const label = { fontSize: 12, fontWeight: 600, color: "#57534e", display: "block", marginBottom: 4 };
+  const input = { width: "100%", padding: "8px 10px", borderRadius: 7, border: "1px solid #d6d3d1", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" };
+  const btn = (col) => ({ padding: "8px 18px", borderRadius: 7, border: "none", background: col, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit" });
+
+  return (
+    <div style={overlay} onClick={onClose}>
+      <div style={box} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <span style={{ fontWeight: 700, fontSize: 16 }}>Configuración API Backend</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#78716c" }}>✕</button>
+        </div>
+        {loading ? (
+          <div style={{ textAlign: "center", padding: 24, color: "#78716c" }}>Cargando…</div>
+        ) : (
+          <>
+            <div style={{ marginBottom: 14 }}>
+              <label style={label}>URL de la API (HTTPS)</label>
+              <input
+                style={input}
+                placeholder="https://tu-fastapi.ejemplo.com"
+                value={form.api_url}
+                onChange={e => setForm(f => ({ ...f, api_url: e.target.value }))}
+              />
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={label}>Token de autenticación</label>
+              <input
+                style={input}
+                type="password"
+                placeholder="Token Bearer"
+                value={form.api_token}
+                onChange={e => setForm(f => ({ ...f, api_token: e.target.value }))}
+              />
+              <div style={{ fontSize: 11, color: "#a8a29e", marginTop: 4 }}>
+                Deja en blanco para mantener el token actual
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button style={{ ...btn("#78716c") }} onClick={handleTest} disabled={testing}>
+                {testing ? "Probando…" : "Probar conexión"}
+              </button>
+              <button style={{ ...btn("#dc2626") }} onClick={handleSave} disabled={saving}>
+                {saving ? "Guardando…" : "Guardar"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};

@@ -69,6 +69,8 @@ ALLOWED_METHODS = {
     "loader_upsert", "loader_remove",
     # Info
     "app_info", "get_odbc_diagnostics", "get_debug_log", "get_audit_log",
+    # Config API
+    "get_api_config", "save_api_config",
     # Excel sessions
     "get_excel_sessions", "switch_excel_session",
     # Graph / SharePoint
@@ -523,6 +525,8 @@ HANDLERS = {
     "graph_list_files":         lambda *a, **k: _graph_list_files(),
     "graph_load_file":          lambda *a, **k: _graph_load_file(*a, **k),
     "graph_download_b64":       lambda *a, **k: _graph_download_b64(*a, **k),
+    "get_api_config":           lambda *a, **k: C.get_api_config(),
+    "save_api_config":          lambda *a, **k: C.save_api_config(*a, **k),
 }
 
 

@@ -1,31 +1,58 @@
 """
 PULSO · Llamadas al AS400 via FastAPI bridge
 =============================================
-Equivalente a las funciones odbc_* de qr_teku_core.py,
-pero solo usando la API HTTP (PULSO_API_URL / PULSO_API_TOKEN).
+La URL y el token se leen desde Firestore (config/api)
+para poder modificarlos desde la app sin redesplegar.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import urllib.request
 import urllib.parse
 
-PULSO_API_URL = os.environ.get("PULSO_API_URL", "").rstrip("/")
-PULSO_API_TOKEN = os.environ.get("PULSO_API_TOKEN", "")
+_cfg_cache: dict | None = None
+
+
+def _load_cfg() -> dict:
+    """Lee config/api de Firestore (con caché en memoria por instancia)."""
+    global _cfg_cache
+    if _cfg_cache is not None:
+        return _cfg_cache
+    try:
+        from firebase_admin import firestore
+        doc = firestore.client().collection("config").document("api").get()
+        _cfg_cache = doc.to_dict() if doc.exists else {}
+    except Exception:
+        _cfg_cache = {}
+    return _cfg_cache
+
+
+def _invalidate_cache():
+    global _cfg_cache
+    _cfg_cache = None
+
+
+def _api_url() -> str:
+    return (_load_cfg().get("api_url") or "").rstrip("/")
+
+
+def _api_token() -> str:
+    return _load_cfg().get("api_token") or ""
 
 
 def _get(path: str, params: dict | None = None) -> dict | None:
-    if not PULSO_API_URL or not PULSO_API_TOKEN:
+    url_base = _api_url()
+    token = _api_token()
+    if not url_base or not token:
         return None
     try:
-        url = PULSO_API_URL + path
+        url = url_base + path
         if params:
             url += "?" + urllib.parse.urlencode(params)
         req = urllib.request.Request(
             url,
-            headers={"Authorization": f"Bearer {PULSO_API_TOKEN}"},
+            headers={"Authorization": f"Bearer {token}"},
         )
         with urllib.request.urlopen(req, timeout=8) as resp:
             return json.loads(resp.read().decode())
@@ -35,7 +62,6 @@ def _get(path: str, params: dict | None = None) -> dict | None:
 
 
 def lookup_chf(matricula: str) -> dict:
-    """Busca datos del camión por matrícula en GEZCAM."""
     if not matricula:
         return {}
     data = _get("/api/pulso/gezcam/lookup", {"matricula": matricula})
@@ -45,7 +71,6 @@ def lookup_chf(matricula: str) -> dict:
 
 
 def lookup_client(codcli: str) -> dict:
-    """Busca datos del cliente en GECLI2."""
     if not codcli:
         return {}
     data = _get("/api/pulso/gecli2/cif", {"codcli": codcli})
@@ -55,7 +80,6 @@ def lookup_client(codcli: str) -> dict:
 
 
 def load_gezcat() -> dict:
-    """Carga la tabla GEZCAT (planes)."""
     data = _get("/api/pulso/gezcat")
     if data and data.get("ok"):
         return data.get("data", {})
@@ -63,7 +87,6 @@ def load_gezcat() -> dict:
 
 
 def lookup_touliv1(codcli: str, codact: str) -> str:
-    """Consulta TOULIV1 para un cliente/actividad."""
     if not codcli:
         return ""
     data = _get("/api/pulso/gecli2/touliv1", {"codcli": codcli, "codact": codact})
@@ -73,7 +96,6 @@ def lookup_touliv1(codcli: str, codact: str) -> str:
 
 
 def count_gesupe6(ruta: str) -> int:
-    """Cuenta soportes en GESUPE6."""
     if not ruta:
         return 0
     data = _get("/api/pulso/gesupe6/count", {"ruta": ruta})
@@ -83,7 +105,6 @@ def count_gesupe6(ruta: str) -> int:
 
 
 def count_gesupej(codcli: str, ambiente: str) -> int:
-    """Cuenta precintos en GESUPEJ."""
     if not codcli:
         return 0
     data = _get("/api/pulso/gesupej/count", {"codcli": codcli, "ambiente": ambiente})
@@ -93,12 +114,48 @@ def count_gesupej(codcli: str, ambiente: str) -> int:
 
 
 def is_configured() -> bool:
-    return bool(PULSO_API_URL and PULSO_API_TOKEN)
+    return bool(_api_url() and _api_token())
 
 
 def diagnostics() -> dict:
     return {
-        "api_url": PULSO_API_URL or "(no configurada)",
-        "api_token_set": bool(PULSO_API_TOKEN),
+        "api_url": _api_url() or "(no configurada)",
+        "api_token_set": bool(_api_token()),
         "connected": is_configured(),
     }
+
+
+# ── Leer / guardar config desde la app ────────────────────────────────────
+
+def get_api_config() -> dict:
+    """Devuelve la config de la API (token enmascarado)."""
+    cfg = _load_cfg()
+    token = cfg.get("api_token", "")
+    return {
+        "ok": True,
+        "api_url": cfg.get("api_url", ""),
+        "api_token": ("•" * 12 + token[-4:]) if len(token) > 4 else ("•" * len(token)),
+        "configured": is_configured(),
+    }
+
+
+def save_api_config(api_url: str, api_token: str = "") -> dict:
+    """Guarda URL y token en Firestore. Si el token son puntos, mantiene el actual."""
+    try:
+        from firebase_admin import firestore
+        doc_ref = firestore.client().collection("config").document("api")
+        existing = doc_ref.get()
+        current = existing.to_dict() if existing.exists else {}
+
+        new_url = (api_url or "").rstrip("/").strip()
+        # Si el token recibido es solo puntos (enmascarado), mantener el actual
+        if api_token and not all(c == "•" for c in api_token):
+            new_token = api_token.strip()
+        else:
+            new_token = current.get("api_token", "")
+
+        doc_ref.set({"api_url": new_url, "api_token": new_token})
+        _invalidate_cache()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
