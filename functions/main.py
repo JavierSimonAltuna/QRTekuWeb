@@ -374,9 +374,9 @@ def _parse_excel_bytes(data: bytes, filename: str) -> tuple:
 
     TIPOS_AMBIENTE = {"1", "2", "3"}
 
-    # ── Parsear filas de datos ────────────────────────────────────────────
+    # ── Parsear filas de datos (máx 600, igual que desktop) ─────────────
     rows = []
-    for raw_row in all_rows[hdr_idx + 1:]:
+    for raw_row in all_rows[hdr_idx + 1: hdr_idx + 601]:
         if all(v is None for v in raw_row):
             continue
 
@@ -672,10 +672,14 @@ def _switch_excel_session(idx: int):
 
 # ── AS400 ─────────────────────────────────────────────────────────────────
 def _lookup_chf(matricula: str):
+    tractora_norm = (matricula or "").upper().replace(" ", "").replace("-", "").strip()
+    api_url = C._api_url()
+    print(f"[lookup_chf] matricula={matricula!r} norm={tractora_norm!r} api_url={api_url!r}")
     data = C.lookup_chf(matricula)
+    print(f"[lookup_chf] result data={data!r}")
     if data:
         return {"ok": True, "found": True, **data}
-    return {"ok": True, "found": False, "error": "No encontrado"}
+    return {"ok": True, "found": False, "error": "No encontrado", "debug_norm": tractora_norm, "debug_api_url": api_url}
 
 
 def _count_gesupej(cod_centro: str, tipo_viaje: str = "ambiente", col_w: str = ""):

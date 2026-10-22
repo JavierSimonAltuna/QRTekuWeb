@@ -72,7 +72,14 @@ def lookup_chf(matricula: str) -> dict:
     tractora_norm = _norm_tractor(matricula)
     data = _get("/api/pulso/gezcam/lookup", {"matricula": tractora_norm})
     if data and data.get("ok"):
-        return data.get("data", {})
+        # Soportar respuesta anidada {"data": {cif, agencia}} o plana {cif, agencia}
+        nested = data.get("data")
+        if isinstance(nested, dict) and nested:
+            return nested
+        # Intentar campos planos directamente en la respuesta
+        flat = {k: v for k, v in data.items() if k not in ("ok", "error", "data")}
+        if flat:
+            return flat
     return {}
 
 
