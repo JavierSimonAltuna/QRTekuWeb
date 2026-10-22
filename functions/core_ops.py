@@ -61,10 +61,16 @@ def _get(path: str, params: dict | None = None) -> dict | None:
         return None
 
 
+def _norm_tractor(s: str) -> str:
+    """Normaliza matrícula igual que el desktop: mayúsculas, sin espacios ni guiones."""
+    return (s or "").upper().replace(" ", "").replace("-", "").strip()
+
+
 def lookup_chf(matricula: str) -> dict:
     if not matricula:
         return {}
-    data = _get("/api/pulso/gezcam/lookup", {"matricula": matricula})
+    tractora_norm = _norm_tractor(matricula)
+    data = _get("/api/pulso/gezcam/lookup", {"matricula": tractora_norm})
     if data and data.get("ok"):
         return data.get("data", {})
     return {}
