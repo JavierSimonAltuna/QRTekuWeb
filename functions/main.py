@@ -483,10 +483,31 @@ def _parse_excel_bytes(data: bytes, filename: str) -> tuple:
     return deduped, fecha_b2
 
 
+def _compute_queue_type(row: dict) -> str:
+    """Compute queue_type matching desktop logic.
+
+    Adelantados (col_w == 'A') always go to the ambiente queue even when
+    the shipment is refrigerado — same rule as in desktop api.py.
+    """
+    tipo_viaje = row.get("tipo_viaje", "ambiente")
+    col_w = str(row.get("col_w") or "").strip().upper()
+    if tipo_viaje == "congelado" and col_w != "A":
+        return "congelado"
+    if tipo_viaje == "refrigerado" and col_w != "A":
+        return "refrigerado"
+    return "ambiente"
+
+
 def _load_excel_base64(filename: str, b64_content: str):
     try:
         data = base64.b64decode(b64_content)
         rows, fecha_b2 = _parse_excel_bytes(data, filename)
+
+        # ── Añadir fecha y queue_type a cada fila (misma lógica que desktop) ──
+        for r in rows:
+            r["fecha"] = fecha_b2
+            r["queue_type"] = _compute_queue_type(r)
+
         session_id = f"session-{_now_iso()[:19].replace(':','-').replace('T','_')}"
         now = _now_iso()
         fs_error = None
@@ -500,7 +521,7 @@ def _load_excel_base64(filename: str, b64_content: str):
                 "rows": rows,
                 "count": len(rows),
             })
-            # Solo metadata en el historial (sin rows — pueden ser grandes)
+            # Historial: solo metadata (rows no caben en 1 doc si hay > 600 filas)
             _cargas_sessions_col().document(session_id).set({
                 "session_id": session_id,
                 "filename": filename,
@@ -511,7 +532,7 @@ def _load_excel_base64(filename: str, b64_content: str):
             fs_error = str(e)
             print(f"[pulso] Firestore write error in load_excel: {e}")
 
-        # Auto-encolar filas nuevas en la cola
+        # Auto-encolar SOLO filas aculadas (misma lógica que desktop)
         auto_count = 0
         try:
             snap = Q.snapshot()
@@ -525,6 +546,9 @@ def _load_excel_base64(filename: str, b64_content: str):
                 ] for it in lst
             }
             for row in rows:
+                # Solo aculados activos — igual que desktop
+                if not row.get("aculado") or row.get("ya_cargado"):
+                    continue
                 n_viaje = str(row.get("n") or "").strip()
                 destino = str(row.get("destino") or "").strip()
                 if not n_viaje and not destino:
@@ -532,9 +556,7 @@ def _load_excel_base64(filename: str, b64_content: str):
                 key = n_viaje or destino
                 if key in existing_ids:
                     continue
-                # Usar tipo_viaje del row para queue_type
-                row_with_qt = {**row, "queue_type": row.get("tipo_viaje", "ambiente")}
-                Q.enqueue_manual(row_with_qt, urgente=False)
+                Q.enqueue_manual(row, urgente=False)
                 auto_count += 1
         except Exception as e:
             print(f"[pulso] Auto-enqueue error: {e}")
@@ -621,12 +643,18 @@ def _switch_excel_session(idx: int):
     if idx < 0 or idx >= len(sessions):
         return {"ok": False, "error": "Sesión no encontrada"}
     session_id = sessions[idx].to_dict()["session_id"]
-    # Buscar la sesión completa en cargas_sessions (con rows)
-    full = _cargas_sessions_col().document(session_id).get()
-    if not full.exists:
-        return {"ok": False, "error": "Sesión no encontrada"}
-    _cargas_doc().set(full.to_dict())
-    return {"ok": True, "session_id": session_id}
+
+    # Si ya es la sesión activa, devolver ok directamente
+    active = _cargas_doc().get()
+    if active.exists and active.to_dict().get("session_id") == session_id:
+        return {"ok": True, "session_id": session_id}
+
+    # Los datos de filas no se persisten en el historial (documentos de solo metadata).
+    # No es posible restaurar una sesión anterior sin volver a cargar el archivo.
+    return {
+        "ok": False,
+        "error": "Sesión no restaurable — recarga el archivo desde SharePoint o disco local",
+    }
 
 
 # ── AS400 ─────────────────────────────────────────────────────────────────
