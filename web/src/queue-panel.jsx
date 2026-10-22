@@ -54,7 +54,7 @@ const QueuePanel = ({ pushToast }) => {
   const refresh = useCallback(async () => {
     try {
       const r = await window.api.call("queue_snapshot");
-      if (r.ok) setSnap(r);
+      if (r.counts) setSnap(r);
     } catch (e) { /* silencio */ }
   }, []);
 

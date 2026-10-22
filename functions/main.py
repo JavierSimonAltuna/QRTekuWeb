@@ -85,7 +85,10 @@ ALLOWED_METHODS = {
 
 # ── Cola ──────────────────────────────────────────────────────────────────
 def _queue_snapshot():
-    return Q.snapshot()
+    result = Q.snapshot()
+    total = sum(len(result.get(k, [])) for k in ("queued","queued_refr","queued_con","assigned","assigned_refr","assigned_con","pending_merch","pending_merch_refr","pending_merch_con","done"))
+    print(f"[pulso] queue_snapshot: {total} items total, counts={result.get('counts',{})}")
+    return result
 
 def _queue_enqueue_manual(row: dict, urgente: bool = False):
     return Q.enqueue_manual(row, urgente)
