@@ -257,6 +257,7 @@ def _load_excel_base64(filename: str, b64_content: str):
             "filename": filename,
             "loaded_at": _now_iso(),
             "count": len(rows),
+            "rows": rows,
         })
         # Auto-encolar en la cola
         auto_count = 0
@@ -438,27 +439,131 @@ def _graph_test():
         return {"ok": False, "error": str(e)}
 
 
+def _graph_reader_cfg() -> dict:
+    doc = _db().collection("config").document("graph").get()
+    return doc.to_dict() if doc.exists else {}
+
+
+def _graph_token(cfg: dict) -> str:
+    import msal
+    app = msal.ConfidentialClientApplication(
+        cfg["client_id"],
+        authority=f"https://login.microsoftonline.com/{cfg['tenant_id']}",
+        client_credential=cfg["client_secret"],
+    )
+    res = app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
+    if "access_token" not in res:
+        raise RuntimeError(res.get("error_description") or "Auth error")
+    return res["access_token"]
+
+
+def _graph_get(token: str, path: str) -> dict:
+    import requests as _req
+    r = _req.get(
+        f"https://graph.microsoft.com/v1.0{path}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def _graph_site_id(cfg: dict, token: str) -> str:
+    sp = (cfg.get("sharepoint_url") or "").rstrip("/")
+    host = sp.split("//", 1)[-1].split("/")[0]
+    sp_path = (cfg.get("site_path") or "").strip("/")
+    endpoint = f"/sites/{host}:/{sp_path}" if sp_path else f"/sites/{host}"
+    return _graph_get(token, endpoint)["id"]
+
+
 def _graph_list_files():
-    # Implementación simplificada — devuelve lista vacía si no hay Graph configurado
-    return {"ok": True, "files": []}
+    cfg = _graph_reader_cfg()
+    if not (cfg.get("enabled") and cfg.get("tenant_id") and cfg.get("client_id") and cfg.get("client_secret")):
+        return {"ok": True, "files": []}
+    try:
+        token = _graph_token(cfg)
+        site = _graph_site_id(cfg, token)
+        folder = (cfg.get("folder_path") or "").strip("/")
+        if folder:
+            data = _graph_get(token, f"/sites/{site}/drive/root:/{folder}:/children")
+        else:
+            data = _graph_get(token, f"/sites/{site}/drive/root/children")
+        files = []
+        for item in data.get("value", []):
+            if not item.get("name", "").lower().endswith(".xlsx"):
+                continue
+            files.append({
+                "name":       item["name"],
+                "server_url": item["id"],
+                "modified":   item.get("lastModifiedDateTime", ""),
+                "size_kb":    round((item.get("size") or 0) / 1024),
+            })
+        return {"ok": True, "files": files}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 def _graph_load_file(server_url: str):
-    return {"ok": False, "error": "Use load_excel_base64 para cargar ficheros"}
+    """Descarga un Excel de SharePoint y lo carga como sesión activa."""
+    cfg = _graph_reader_cfg()
+    if not cfg.get("client_secret"):
+        return {"ok": False, "error": "SharePoint no configurado"}
+    try:
+        import requests as _req
+        token = _graph_token(cfg)
+        site = _graph_site_id(cfg, token)
+        # Metadatos
+        meta = _req.get(
+            f"https://graph.microsoft.com/v1.0/sites/{site}/drive/items/{server_url}",
+            headers={"Authorization": f"Bearer {token}"}, timeout=15,
+        )
+        meta.raise_for_status()
+        filename = meta.json().get("name", "plan_carga.xlsx")
+        # Contenido
+        r = _req.get(
+            f"https://graph.microsoft.com/v1.0/sites/{site}/drive/items/{server_url}/content",
+            headers={"Authorization": f"Bearer {token}"}, timeout=60, allow_redirects=True,
+        )
+        r.raise_for_status()
+        b64 = base64.b64encode(r.content).decode()
+        return _load_excel_base64(filename, b64)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 def _graph_download_b64(server_url: str):
-    return {"ok": False, "error": "Descarga directa no disponible en modo cloud"}
+    cfg = _graph_reader_cfg()
+    if not cfg.get("client_secret"):
+        return {"ok": False, "error": "SharePoint no configurado"}
+    try:
+        import requests as _req
+        token = _graph_token(cfg)
+        site = _graph_site_id(cfg, token)
+        meta = _req.get(
+            f"https://graph.microsoft.com/v1.0/sites/{site}/drive/items/{server_url}",
+            headers={"Authorization": f"Bearer {token}"}, timeout=15,
+        )
+        meta.raise_for_status()
+        filename = meta.json().get("name", "plan_carga.xlsx")
+        r = _req.get(
+            f"https://graph.microsoft.com/v1.0/sites/{site}/drive/items/{server_url}/content",
+            headers={"Authorization": f"Bearer {token}"}, timeout=60, allow_redirects=True,
+        )
+        r.raise_for_status()
+        return {"ok": True, "filename": filename, "b64": base64.b64encode(r.content).decode()}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 # ── Info ──────────────────────────────────────────────────────────────────
 def _app_info():
+    diag = C.diagnostics()
     return {
         "ok": True,
         "version": "7.0-cloud",
         "mode": "firebase",
         "connected": C.is_configured(),
-        "api_url": C.PULSO_API_URL or "(no configurada)",
+        "api_url": diag.get("api_url", "(no configurada)"),
     }
 
 
