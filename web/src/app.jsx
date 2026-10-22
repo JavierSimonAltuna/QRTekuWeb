@@ -173,7 +173,20 @@ const QRTekuApp = () => {
         if (alive && res && res.ok) {
           setRows((prevRows) => {
             const doneSet = new Set(prevRows.filter((r) => r.estado === "done").map((r) => r.n));
-            return res.rows.map((r) => doneSet.has(r.n) ? { ...r, estado: "done" } : r);
+            const enrichMap = {};
+            prevRows.forEach((r) => {
+              const k = String(r.n ?? ""); if (!k) return;
+              const e = {};
+              if (r.numsup_count != null) e.numsup_count = r.numsup_count;
+              if (r.ruta_carga != null) e.ruta_carga = r.ruta_carga;
+              if (r.combined_count != null) e.combined_count = r.combined_count;
+              if (Object.keys(e).length) enrichMap[k] = e;
+            });
+            return res.rows.map((r) => {
+              const k = String(r.n ?? "");
+              const e = enrichMap[k] || {};
+              return { ...r, ...e, ...(doneSet.has(r.n) ? { estado: "done" } : {}) };
+            });
           });
           if (res.auto_enqueued > 0) {
             pushToast(`${res.auto_enqueued} carga(s) añadidas a la cola Bleecker`, "success");
@@ -216,7 +229,21 @@ const QRTekuApp = () => {
               notifyAcule(newAculCount - prevAculadoCountRef.current);
             }
             prevAculadoCountRef.current = newAculCount;
-            setRows(res.rows);
+            setRows((prevRows) => {
+              const enrichMap = {};
+              prevRows.forEach((r) => {
+                const k = String(r.n ?? ""); if (!k) return;
+                const e = {};
+                if (r.numsup_count != null) e.numsup_count = r.numsup_count;
+                if (r.ruta_carga != null) e.ruta_carga = r.ruta_carga;
+                if (r.combined_count != null) e.combined_count = r.combined_count;
+                if (Object.keys(e).length) enrichMap[k] = e;
+              });
+              return res.rows.map((r) => {
+                const e = enrichMap[String(r.n ?? "")] || {};
+                return Object.keys(e).length ? { ...r, ...e } : r;
+              });
+            });
             setFileInfo((prev) => prev || {
               name: res.filename, count: res.count, fecha: res.fecha_b2, path: res.filename,
             });
@@ -417,7 +444,13 @@ const QRTekuApp = () => {
     setFileInfo({ name: res.filename, count: res.count, fecha: res.fecha_b2, path: path || res.filename });
     setSelectedIdx(null);
     setEditing({});
-  }, []);
+    if (res.auto_enqueued > 0) {
+      pushToast(`${res.auto_enqueued} carga(s) añadidas a la cola Bleecker`, "success");
+    }
+    if (res.auto_enqueue_error) {
+      pushToast(`Error al encolar: ${res.auto_enqueue_error}`, "error");
+    }
+  }, [pushToast]);
 
   const handleImport = async () => {
     if (apiReady()) {

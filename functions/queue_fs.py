@@ -75,18 +75,13 @@ def _audit(action: str, item_id: str = "", data: dict | None = None):
 
 
 def _next_counter() -> int:
+    """Incrementa y devuelve un contador atómico en Firestore."""
     ref = _meta_doc("counter")
-    new_val = db().transaction()
-
-    @firestore.transactional
-    def _increment(tx):
-        snap = ref.get(transaction=tx)
-        current = int(snap.get("value") or 0) if snap.exists else 0
-        nxt = current + 1
-        tx.set(ref, {"value": nxt})
-        return nxt
-
-    return _increment(new_val)
+    doc = ref.get()
+    current = int(doc.get("value") or 0) if doc.exists else 0
+    nxt = current + 1
+    ref.set({"value": nxt})
+    return nxt
 
 
 # ── Cargadores por defecto ─────────────────────────────────────────────────

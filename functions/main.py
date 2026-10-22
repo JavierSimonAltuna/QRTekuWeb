@@ -538,10 +538,11 @@ def _load_excel_base64(filename: str, b64_content: str):
 
         # Auto-encolar SOLO filas aculadas (misma lógica que desktop)
         auto_count = 0
+        auto_enqueue_error = None
         try:
             snap = Q.snapshot()
             existing_ids = {
-                it["id"] for lst in [
+                it.get("id", "") for lst in [
                     snap.get("queued", []), snap.get("queued_refr", []),
                     snap.get("queued_con", []), snap.get("assigned", []),
                     snap.get("assigned_refr", []), snap.get("assigned_con", []),
@@ -549,10 +550,9 @@ def _load_excel_base64(filename: str, b64_content: str):
                     snap.get("pending_merch_con", []),
                 ] for it in lst
             }
-            for row in rows:
-                # Solo aculados activos — igual que desktop
-                if not row.get("aculado") or row.get("ya_cargado"):
-                    continue
+            aculadas = [r for r in rows if r.get("aculado") and not r.get("ya_cargado")]
+            print(f"[pulso] Auto-enqueue: {len(aculadas)} aculadas candidatas de {len(rows)} filas")
+            for row in aculadas:
                 n_viaje = str(row.get("n") or "").strip()
                 destino = str(row.get("destino") or "").strip()
                 if not n_viaje and not destino:
@@ -560,10 +560,15 @@ def _load_excel_base64(filename: str, b64_content: str):
                 key = n_viaje or destino
                 if key in existing_ids:
                     continue
-                Q.enqueue_manual(row, urgente=False)
-                auto_count += 1
+                try:
+                    Q.enqueue_manual(row, urgente=False)
+                    auto_count += 1
+                except Exception as e2:
+                    auto_enqueue_error = str(e2)
+                    print(f"[pulso] enqueue_manual error row {key}: {e2}\n{traceback.format_exc()}")
         except Exception as e:
-            print(f"[pulso] Auto-enqueue error: {e}")
+            auto_enqueue_error = str(e)
+            print(f"[pulso] Auto-enqueue setup error: {e}\n{traceback.format_exc()}")
 
         result = {
             "ok": True, "rows": rows, "filename": filename,
@@ -572,6 +577,8 @@ def _load_excel_base64(filename: str, b64_content: str):
         }
         if fs_error:
             result["warning"] = f"Datos cargados pero no persistidos: {fs_error}"
+        if auto_enqueue_error:
+            result["auto_enqueue_error"] = auto_enqueue_error
         return result
     except Exception as e:
         return {"ok": False, "error": str(e)}
