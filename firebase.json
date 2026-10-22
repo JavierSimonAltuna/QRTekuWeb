@@ -20,7 +20,10 @@
       {
         "source": "**/*.@(js|jsx|css)",
         "headers": [
-          { "key": "Cache-Control", "value": "public, max-age=3600" }
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=3600"
+          }
         ]
       }
     ]
@@ -31,7 +34,10 @@
       "codebase": "pulso",
       "runtime": "python312",
       "ignore": [
-        "venv", ".venv", "__pycache__", "*.pyc"
+        "venv",
+        ".venv",
+        "__pycache__",
+        "*.pyc"
       ]
     }
   ]
