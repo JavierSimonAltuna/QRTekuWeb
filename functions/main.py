@@ -476,6 +476,29 @@ def _graph_site_id(cfg: dict, token: str) -> str:
     return _graph_get(token, endpoint)["id"]
 
 
+_DOC_LIB_PREFIXES = (
+    "documentos compartidos/",
+    "shared documents/",
+    "documents/",
+    "documentos/",
+)
+
+
+def _graph_normalize_folder(folder_path: str) -> str:
+    """Strip document-library root prefix.
+
+    Graph /drive/root already points to the default library
+    ('Documentos compartidos'), so that segment must not appear
+    in the folder path we send to the API.
+    """
+    f = (folder_path or "").strip("/")
+    fl = f.lower()
+    for p in _DOC_LIB_PREFIXES:
+        if fl.startswith(p):
+            return f[len(p):].strip("/")
+    return f
+
+
 def _graph_list_files():
     cfg = _graph_reader_cfg()
     if not (cfg.get("enabled") and cfg.get("tenant_id") and cfg.get("client_id") and cfg.get("client_secret")):
@@ -483,7 +506,7 @@ def _graph_list_files():
     try:
         token = _graph_token(cfg)
         site = _graph_site_id(cfg, token)
-        folder = (cfg.get("folder_path") or "").strip("/")
+        folder = _graph_normalize_folder(cfg.get("folder_path") or "")
         if folder:
             data = _graph_get(token, f"/sites/{site}/drive/root:/{folder}:/children")
         else:
