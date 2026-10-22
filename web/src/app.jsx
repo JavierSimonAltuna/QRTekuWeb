@@ -1442,9 +1442,11 @@ const ApiConfigModal = ({ onClose, onSaved, pushToast }) => {
   const handleTest = async () => {
     setTesting(true);
     try {
-      const r = await window.api.call("get_odbc_diagnostics");
-      if (r && r.connected) pushToast("✓ API conectada correctamente", "success");
-      else pushToast("No se pudo conectar — revisa URL y token", "error");
+      const saveR = await window.api.call("save_api_config", form.api_url, form.api_token);
+      if (!saveR.ok) { pushToast(`Error guardando: ${saveR.error}`, "error"); return; }
+      const r = await window.api.call("test_api_connection");
+      if (r && r.ok) pushToast("✓ API conectada correctamente", "success");
+      else pushToast(r?.error || "No se pudo conectar — revisa URL y token", "error");
     } finally { setTesting(false); }
   };
 

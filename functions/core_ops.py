@@ -117,6 +117,30 @@ def is_configured() -> bool:
     return bool(_api_url() and _api_token())
 
 
+def test_connection() -> dict:
+    url = _api_url()
+    token = _api_token()
+    if not url:
+        return {"ok": False, "error": "URL no configurada"}
+    if not token:
+        return {"ok": False, "error": "Token no configurado"}
+    import urllib.error
+    try:
+        req = urllib.request.Request(
+            url.rstrip("/") + "/api/pulso/gezcat",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            json.loads(resp.read().decode())
+            return {"ok": True, "message": "API conectada correctamente"}
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return {"ok": False, "error": f"Token inválido (HTTP {e.code})"}
+        return {"ok": False, "error": f"Error HTTP {e.code}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 def diagnostics() -> dict:
     return {
         "api_url": _api_url() or "(no configurada)",
