@@ -32,6 +32,13 @@ TABLE_GESUPE6 = "FGE50STO.GESUPE6"
 TABLE_GESUPEJ = "FGE50STO.GESUPEJ"
 TABLE_GEZCAT  = "FGE50STO.GEZCAT"
 
+# ─── API HTTP (sustituye ODBC cuando está configurada) ──────────────────
+# Configura estas variables de entorno en el PC de producción:
+#   PULSO_API_URL   → URL base de la FastAPI, ej. https://api.miempresa.com
+#   PULSO_API_TOKEN → Bearer token de autenticación
+PULSO_API_URL   = os.environ.get("PULSO_API_URL", "").rstrip("/")
+PULSO_API_TOKEN = os.environ.get("PULSO_API_TOKEN", "")
+
 # Tipos de camión AMBIENTE (col F); el resto = REFRIGERADO
 TIPOS_AMBIENTE = frozenset({"1", "2", "3"})
 
@@ -569,6 +576,31 @@ def load_excel(path: str) -> tuple[list[dict], str]:
     return deduped, fecha_b2
 
 
+# ─── API HTTP helper ────────────────────────────────────────────────────
+def _api_get(path: str, params: dict | None = None) -> dict | None:
+    """
+    GET {PULSO_API_URL}{path} con Bearer token.
+    Devuelve el JSON parseado, o None si falla o la URL no está configurada.
+    """
+    if not PULSO_API_URL or not PULSO_API_TOKEN:
+        return None
+    try:
+        import urllib.request
+        import urllib.parse
+        url = PULSO_API_URL + path
+        if params:
+            url += "?" + urllib.parse.urlencode(params)
+        req = urllib.request.Request(
+            url,
+            headers={"Authorization": f"Bearer {PULSO_API_TOKEN}"},
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return json.loads(resp.read().decode())
+    except Exception as e:
+        _log_odbc("API_HTTP", path, "ERROR", error=str(e))
+        return None
+
+
 # ─── ODBC + CHF Excel fallback ──────────────────────────────────────────
 def _sql_norm(col: str) -> str:
     return f"REPLACE(REPLACE(UPPER({col}), ' ', ''), '-', '')"
@@ -576,7 +608,7 @@ def _sql_norm(col: str) -> str:
 
 def odbc_lookup_chf(matricula: str) -> tuple[str, str]:
     """
-    Busca CIF + Agencia. Primero por ODBC, luego por Excel CHF (fallback).
+    Busca CIF + Agencia. Primero por API HTTP, luego ODBC, luego Excel CHF.
     Devuelve (CIF, Agencia). Cachea resultados.
     """
     tractora_norm = _norm_tractor(matricula)
@@ -587,7 +619,17 @@ def odbc_lookup_chf(matricula: str) -> tuple[str, str]:
 
     cif, agencia = "", ""
 
-    # Intento 1: ODBC
+    # Intento 1: API HTTP
+    data = _api_get("/api/pulso/gezcam/lookup", {"matricula": tractora_norm})
+    if data and data.get("ok"):
+        cif     = data.get("cif", "")
+        agencia = data.get("agencia", "")
+        if cif or agencia:
+            _odbc_cache[tractora_norm] = (cif, agencia)
+            _log_odbc("GEZCAM", tractora_norm, "OK" if data.get("found") else "NOT_FOUND", cif)
+            return cif, agencia
+
+    # Intento 2: ODBC directo (fallback cuando no hay API)
     try:
         import pyodbc
         conn = pyodbc.connect(
@@ -609,16 +651,15 @@ def odbc_lookup_chf(matricula: str) -> tuple[str, str]:
                 if row:
                     break
             if row:
-                cif = _safe_str(getattr(row, "CODTRA", ""))      # CIF
-                agencia = _safe_str(getattr(row, "CODCHF", ""))  # Agencia
+                cif = _safe_str(getattr(row, "CODTRA", ""))
+                agencia = _safe_str(getattr(row, "CODCHF", ""))
         finally:
             try: conn.close()
             except Exception: pass
     except Exception:
-        # Falla silenciosa, intentamos fallback
         pass
 
-    # Intento 2: Excel CHF
+    # Intento 3: Excel CHF
     if not cif or not agencia:
         try:
             df_chf = _load_chf_table()
@@ -638,8 +679,8 @@ def odbc_lookup_chf(matricula: str) -> tuple[str, str]:
 
 def odbc_lookup_client(cod_cli: str) -> tuple[str, str]:
     """
-    Busca CIF + Agencia por CODCLI en FGE50STO.GECLI2.
-    Devuelve (CIF, Agencia). Cachea resultados en _client_cache.
+    Busca CIF + Agencia por CODCLI en GECLI2.
+    Primero API HTTP, luego ODBC directo. Cachea resultados.
     """
     key = _to_codcli_key(cod_cli)
     if not key or key == "00000000":
@@ -647,6 +688,16 @@ def odbc_lookup_client(cod_cli: str) -> tuple[str, str]:
     if key in _client_cache:
         return _client_cache[key]
     cif, agencia = "", ""
+
+    # Intento 1: API HTTP
+    data = _api_get("/api/pulso/gecli2/cif", {"codcli": key})
+    if data and data.get("ok"):
+        cif     = data.get("cif", "")
+        agencia = data.get("agencia", "")
+        _client_cache[key] = (cif, agencia)
+        return cif, agencia
+
+    # Intento 2: ODBC directo
     try:
         import pyodbc
         conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=5)
@@ -689,11 +740,22 @@ def _to_codcli_key(cod_cli) -> str:
 
 
 def odbc_load_gezcat() -> "dict[str, str]":
-    """Carga GEZCAT completo (sin filtros): {CATCLI: LIBCAT}. Cachea en memoria."""
+    """Carga GEZCAT completo: {CATCLI: LIBCAT}. Cachea en memoria. API HTTP primero."""
     global _gezcat_cache
     if _gezcat_cache is not None:
         return _gezcat_cache
     result: dict[str, str] = {}
+
+    # Intento 1: API HTTP
+    data = _api_get("/api/pulso/gezcat")
+    if data and data.get("ok"):
+        result = {str(k): str(v) for k, v in (data.get("data") or {}).items()}
+        if result:
+            _log_odbc("GEZCAT", "*", "OK", len(result))
+            _gezcat_cache = result
+            return result
+
+    # Intento 2: ODBC directo
     try:
         import pyodbc
         conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=8)
@@ -746,10 +808,8 @@ def get_ideal_pales(catcli: str) -> "int | None":
 
 def odbc_lookup_touliv1(cod_cli: str, codact: str = "101") -> "tuple[int | None, str]":
     """
-    Busca TOULIV1 y CATCLI en FGE50STO.GECLI2 por CODCLI y CODACT (campo CHAR).
-    - Ambiente:     codact='101'
-    - Refrigerado:  codact='003'
-    Devuelve (touliv1: int|None, catcli: str). Cachea por (codcli, codact).
+    Busca TOULIV1 y CATCLI en GECLI2 por CODCLI y CODACT.
+    API HTTP primero, luego ODBC directo. Cachea por (codcli, codact).
     """
     key = _to_codcli_key(cod_cli)
     if not key or key == "00000000":
@@ -761,6 +821,20 @@ def odbc_lookup_touliv1(cod_cli: str, codact: str = "101") -> "tuple[int | None,
         return cached
     result = None
     catcli = ""
+
+    # Intento 1: API HTTP
+    data = _api_get("/api/pulso/gecli2/touliv1", {"codcli": key, "codact": codact})
+    if data and data.get("ok"):
+        raw = data.get("touliv1")
+        if raw is not None:
+            try: result = int(raw)
+            except (ValueError, TypeError): result = None
+        catcli = str(data.get("catcli") or "").strip()
+        _log_odbc("TOULIV1", cache_key, "OK" if result is not None else "NOT_FOUND", result)
+        _touliv1_cache[cache_key] = (result, catcli)
+        return result, catcli
+
+    # Intento 2: ODBC directo
     try:
         import pyodbc
         conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=5)
@@ -791,10 +865,19 @@ def odbc_lookup_touliv1(cod_cli: str, codact: str = "101") -> "tuple[int | None,
 
 def odbc_count_gesupe6(ruta_carga: int) -> int:
     """
-    Cuenta pales supervisados para una ruta: COUNT(*) en GESUPE6
-    WHERE TOULIV=ruta_carga AND ETASUP=30. Sin caché (tiempo real).
+    Cuenta pales supervisados (GESUPE6 WHERE TOULIV=ruta AND ETASUP=30).
+    Sin caché (tiempo real). API HTTP primero, luego ODBC.
     """
     key = str(ruta_carga)
+
+    # Intento 1: API HTTP
+    data = _api_get("/api/pulso/gesupe6/count", {"ruta": int(ruta_carga)})
+    if data and data.get("ok"):
+        count = int(data.get("count", 0))
+        _log_odbc("GESUPE6", key, "OK", count)
+        return count
+
+    # Intento 2: ODBC directo
     try:
         import pyodbc
         conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=5)
@@ -817,16 +900,23 @@ def odbc_count_gesupe6(ruta_carga: int) -> int:
 def odbc_count_gesupej(cod_cli: str, ambiente: bool = True) -> int:
     """
     Cuenta pales validados en GESUPEJ por cliente (tiempo real, sin caché).
-    - ambiente=True:  CODACT IN  ('001','007','101','107','201','207','300')
-    - ambiente=False: CODACT NOT IN (mismos valores)
-    Siempre filtra ETASUP = 30, TYPSUP <> '3' y CLILIV = cod_cliente normalizado 8 dígitos.
+    API HTTP primero, luego ODBC directo.
     """
     key = _to_codcli_key(cod_cli)
     if not key or key == "00000000":
         return 0
+    log_key = f"{key}:{'amb' if ambiente else 'ref'}"
+
+    # Intento 1: API HTTP
+    data = _api_get("/api/pulso/gesupej/count", {"codcli": key, "ambiente": str(ambiente).lower()})
+    if data and data.get("ok"):
+        count = int(data.get("count", 0))
+        _log_odbc("GESUPEJ", log_key, "OK", count)
+        return count
+
+    # Intento 2: ODBC directo
     codact_list = ", ".join(_GESUPEJ_CODACT_AMBIENTE)
     codact_clause = f"CODACT IN ({codact_list})" if ambiente else f"CODACT NOT IN ({codact_list})"
-    log_key = f"{key}:{'amb' if ambiente else 'ref'}"
     try:
         import pyodbc
         conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=5)
