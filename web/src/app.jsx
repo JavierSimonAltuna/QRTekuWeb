@@ -313,22 +313,34 @@ const QRTekuApp = () => {
   // ── Selection + ODBC lookup ────────────────────────────────────
   const lookupCifAgencia = useCallback(async (idx, row) => {
     const matricula = (row.matriculas || "").split("/")[0]?.trim();
-    if (!matricula) return;
     setLoadingOdbc(true);
     try {
-      const res = await window.api.call("lookup_chf", matricula);
+      // Lanzar CIF lookup y conteo de pales en paralelo (para cualquier camión, no solo aculados)
+      const [res, countRes] = await Promise.all([
+        matricula
+          ? window.api.call("lookup_chf", matricula)
+          : Promise.resolve({ ok: false }),
+        row.cod_centro
+          ? window.api.call("count_gesupej", row.cod_centro, row.tipo_viaje || "ambiente")
+          : Promise.resolve({ ok: true, numsup_count: 0 }),
+      ]);
       setLoadingOdbc(false);
+
       if (res.ok && res.found) {
         setEditing((e) => ({ ...e, [idx]: { ...e[idx], C: res.cif, E: res.agencia, odbcDone: true, odbcFound: true } }));
         pushToast(`CIF + Agencia: ${res.cif} · ${res.agencia}`, "success");
-        // Sincronizar al servidor para que el otro dispositivo vea el CIF
         window.api.call("update_row", row.n, { cif: res.cif, agencia: res.agencia }).catch(() => {});
-      } else {
+      } else if (matricula) {
         setEditing((e) => ({ ...e, [idx]: { ...e[idx], odbcDone: true, odbcFound: false } }));
         pushToast(`No se encontró ${matricula} en GEZCAM`, "error");
-        // marcar la fila como missing-cif
-        setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, estado: "missing-cif" } : r)));
+        setRows((rs) => rs.map((r) => (r.n === row.n ? { ...r, estado: "missing-cif" } : r)));
         window.api.call("update_row", row.n, { estado: "missing-cif" }).catch(() => {});
+      }
+
+      // Actualizar pales para cualquier camión (aculado o no)
+      if (countRes.ok && countRes.numsup_count > 0) {
+        setRows((rs) => rs.map((r) => (r.n === row.n ? { ...r, numsup_count: countRes.numsup_count } : r)));
+        window.api.call("update_row", row.n, { numsup_count: countRes.numsup_count }).catch(() => {});
       }
     } catch (err) {
       setLoadingOdbc(false);

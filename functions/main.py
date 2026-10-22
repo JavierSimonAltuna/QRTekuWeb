@@ -55,7 +55,7 @@ ALLOWED_METHODS = {
     "loader_login", "loader_current", "loader_request_next",
     "loader_refresh_precintos", "loader_finish", "loader_set_muelle",
     # Cargas (supervisor)
-    "load_excel_base64", "reload_excel", "lookup_chf",
+    "load_excel_base64", "reload_excel", "lookup_chf", "count_gesupej",
     "get_cargas_state", "update_row",
     # Cola
     "queue_snapshot", "queue_enqueue_manual", "queue_remove", "queue_reassign",
@@ -601,7 +601,7 @@ def _get_cargas_state():
 
 
 def _update_row(n: str, patch: dict):
-    allowed = {"cif", "agencia", "estado", "precintos_data", "muelle", "playa", "matriculas"}
+    allowed = {"cif", "agencia", "estado", "precintos_data", "muelle", "playa", "matriculas", "numsup_count", "ruta_carga"}
     patch = {k: v for k, v in (patch or {}).items() if k in allowed}
     if not patch:
         return {"ok": True}
@@ -661,8 +661,22 @@ def _switch_excel_session(idx: int):
 def _lookup_chf(matricula: str):
     data = C.lookup_chf(matricula)
     if data:
-        return {"ok": True, **data}
-    return {"ok": False, "error": "No encontrado"}
+        return {"ok": True, "found": True, **data}
+    return {"ok": True, "found": False, "error": "No encontrado"}
+
+
+def _count_gesupej(cod_centro: str, tipo_viaje: str = "ambiente"):
+    """Devuelve la cuenta de pales pendientes (GESUPEJ) para un cod_centro."""
+    try:
+        s = str(cod_centro or "").strip()
+        codcli = str(int(float(s))).zfill(8) if s else ""
+    except (ValueError, TypeError):
+        codcli = str(cod_centro or "").strip()
+    if not codcli:
+        return {"ok": True, "numsup_count": 0}
+    ambiente = str(tipo_viaje or "").lower() == "ambiente"
+    count = C.count_gesupej(codcli, "true" if ambiente else "false")
+    return {"ok": True, "numsup_count": count}
 
 
 # ── CSV export ────────────────────────────────────────────────────────────
@@ -935,6 +949,7 @@ HANDLERS = {
     "get_excel_sessions":       lambda *a, **k: _get_excel_sessions(),
     "switch_excel_session":     lambda *a, **k: _switch_excel_session(*a, **k),
     "lookup_chf":               lambda *a, **k: _lookup_chf(*a, **k),
+    "count_gesupej":            lambda *a, **k: _count_gesupej(*a, **k),
     "export_cargas_csv":        lambda *a, **k: _export_cargas_csv(),
     "app_info":                 lambda *a, **k: _app_info(),
     "get_odbc_diagnostics":     lambda *a, **k: _get_odbc_diagnostics(),
