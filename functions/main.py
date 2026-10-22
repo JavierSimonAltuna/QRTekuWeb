@@ -214,26 +214,51 @@ def _loader_remove(loader_id: str):
 
 # ── Cargas (Excel) en Firestore ────────────────────────────────────────────
 
-def _parse_excel_bytes(data: bytes, filename: str) -> dict:
-    """Parsea un Excel y devuelve las filas. Mismo formato que api.py load_excel."""
+def _safe_cell(v) -> str:
+    """Convierte cualquier valor de celda openpyxl a string seguro para Firestore."""
+    if v is None:
+        return ""
+    import datetime as _dt
+    if isinstance(v, (_dt.datetime, _dt.date)):
+        return v.isoformat()
+    if isinstance(v, _dt.timedelta):
+        total = int(v.total_seconds())
+        h, rem = divmod(abs(total), 3600)
+        return f"{h:02d}:{rem // 60:02d}"
+    if isinstance(v, bool):
+        return "1" if v else "0"
+    if isinstance(v, float):
+        if v != v:  # NaN
+            return ""
+        return str(int(v)) if v == int(v) else str(v)
+    if isinstance(v, int):
+        return str(v)
+    return str(v).strip()
+
+
+def _parse_excel_bytes(data: bytes, filename: str) -> list:
+    """Parsea un Excel y devuelve las filas."""
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
     ws = wb.active
-    headers = [str(c.value or "").strip() for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    raw_headers = [str(c.value or "").strip() for c in next(ws.iter_rows(min_row=1, max_row=1))]
     rows = []
     for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=1):
+        if all(v is None for v in row):
+            continue  # fila vacía
         r = {"n": str(i)}
-        for h, v in zip(headers, row):
-            r[h] = str(v or "").strip() if v is not None else ""
-        # Normalizar campos clave
-        r.setdefault("ruta", r.get("RUTA", r.get("Ruta", "")))
-        r.setdefault("muelle", r.get("MUELLE", r.get("Muelle", "")))
-        r.setdefault("playa", r.get("PLAYA", r.get("Playa", "")))
-        r.setdefault("hora_salida", r.get("SALIDA", r.get("hora_salida", "")))
-        r.setdefault("cam", r.get("CAMION", r.get("Camion", r.get("cam", ""))))
-        r.setdefault("codcli", r.get("CODCLI", r.get("CodCli", "")))
-        r.setdefault("agencia", r.get("AGENCIA", r.get("Agencia", "")))
-        r.setdefault("estado", "pendiente")
+        for h, v in zip(raw_headers, row):
+            if h:  # ignorar columnas sin cabecera
+                r[h] = _safe_cell(v)
+        # Normalizar campos clave (alias minúsculas)
+        r["ruta"] = r.get("ruta") or r.get("RUTA") or r.get("Ruta") or ""
+        r["muelle"] = r.get("muelle") or r.get("MUELLE") or r.get("Muelle") or ""
+        r["playa"] = r.get("playa") or r.get("PLAYA") or r.get("Playa") or ""
+        r["hora_salida"] = r.get("hora_salida") or r.get("SALIDA") or ""
+        r["cam"] = r.get("cam") or r.get("CAMION") or r.get("Camion") or ""
+        r["codcli"] = r.get("codcli") or r.get("CODCLI") or r.get("CodCli") or ""
+        r["agencia"] = r.get("agencia") or r.get("AGENCIA") or r.get("Agencia") or ""
+        r["estado"] = "pendiente"
         rows.append(r)
     return rows
 
@@ -243,45 +268,59 @@ def _load_excel_base64(filename: str, b64_content: str):
         data = base64.b64decode(b64_content)
         rows = _parse_excel_bytes(data, filename)
         session_id = f"session-{_now_iso()[:19].replace(':','-').replace('T','_')}"
-        session = {
-            "session_id": session_id,
-            "filename": filename,
-            "loaded_at": _now_iso(),
-            "rows": rows,
-            "count": len(rows),
-        }
-        # Guardar como sesión activa y añadir al historial
-        _cargas_doc().set(session)
-        _cargas_sessions_col().document(session_id).set({
-            "session_id": session_id,
-            "filename": filename,
-            "loaded_at": _now_iso(),
-            "count": len(rows),
-            "rows": rows,
-        })
-        # Auto-encolar en la cola
+        now = _now_iso()
+        fs_error = None
+
+        # Guardar en Firestore (sesión activa)
+        try:
+            _cargas_doc().set({
+                "session_id": session_id,
+                "filename": filename,
+                "loaded_at": now,
+                "rows": rows,
+                "count": len(rows),
+            })
+            # Solo metadata en el historial (sin rows — pueden ser grandes)
+            _cargas_sessions_col().document(session_id).set({
+                "session_id": session_id,
+                "filename": filename,
+                "loaded_at": now,
+                "count": len(rows),
+            })
+        except Exception as e:
+            fs_error = str(e)
+            print(f"[pulso] Firestore write error in load_excel: {e}")
+
+        # Auto-encolar filas nuevas en la cola
         auto_count = 0
-        snap = Q.snapshot()
-        existing_ids = {
-            it["id"] for lst in [
-                snap.get("queued", []), snap.get("queued_refr", []),
-                snap.get("queued_con", []), snap.get("assigned", []),
-                snap.get("assigned_refr", []), snap.get("assigned_con", []),
-                snap.get("pending_merch", []), snap.get("pending_merch_refr", []),
-                snap.get("pending_merch_con", []),
-            ] for it in lst
-        }
-        for row in rows:
-            ruta = str(row.get("ruta") or "").strip()
-            if not ruta or ruta in existing_ids:
-                continue
-            Q.enqueue_manual(row, urgente=False)
-            auto_count += 1
-        return {
+        try:
+            snap = Q.snapshot()
+            existing_ids = {
+                it["id"] for lst in [
+                    snap.get("queued", []), snap.get("queued_refr", []),
+                    snap.get("queued_con", []), snap.get("assigned", []),
+                    snap.get("assigned_refr", []), snap.get("assigned_con", []),
+                    snap.get("pending_merch", []), snap.get("pending_merch_refr", []),
+                    snap.get("pending_merch_con", []),
+                ] for it in lst
+            }
+            for row in rows:
+                ruta = str(row.get("ruta") or "").strip()
+                if not ruta or ruta in existing_ids:
+                    continue
+                Q.enqueue_manual(row, urgente=False)
+                auto_count += 1
+        except Exception as e:
+            print(f"[pulso] Auto-enqueue error: {e}")
+
+        result = {
             "ok": True, "rows": rows, "filename": filename,
             "count": len(rows), "auto_enqueued": auto_count,
             "session_id": session_id,
         }
+        if fs_error:
+            result["warning"] = f"Datos cargados pero no persistidos: {fs_error}"
+        return result
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -666,7 +705,7 @@ HANDLERS = {
 @https_fn.on_request(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["GET", "POST", "OPTIONS"]),
     memory=options.MemoryOption.MB_512,
-    timeout_sec=60,
+    timeout_sec=120,
 )
 def api(req: https_fn.Request) -> https_fn.Response:
     if req.method == "OPTIONS":
