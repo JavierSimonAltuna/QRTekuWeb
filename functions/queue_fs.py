@@ -114,15 +114,15 @@ def snapshot() -> dict:
     ).get()
     all_items = [d.to_dict() for d in active_docs]
 
-    # Últimos 50 completados
+    # Últimos 50 completados — sin order_by para no requerir índice compuesto
     done_docs = (
         _items_col()
         .where(filter=firestore.FieldFilter("status", "==", "done"))
-        .order_by("finished_at", direction=firestore.Query.DESCENDING)
-        .limit(50)
+        .limit(200)
         .get()
     )
-    done = [d.to_dict() for d in done_docs]
+    done_all = [d.to_dict() for d in done_docs]
+    done = sorted(done_all, key=lambda x: x.get("finished_at") or "", reverse=True)[:50]
 
     # Loaders
     loader_docs = _loaders_col().get()
