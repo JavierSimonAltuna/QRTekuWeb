@@ -214,6 +214,8 @@ def _loader_remove(loader_id: str):
 
 # ── Cargas (Excel) en Firestore ────────────────────────────────────────────
 
+_EXCEL_ERRORS = {"#n/a", "#value!", "#ref!", "#div/0!", "#name?", "#null!", "#num!", "#na"}
+
 def _safe_str(v) -> str:
     """Convierte cualquier valor de celda a string limpio."""
     if v is None:
@@ -236,7 +238,9 @@ def _safe_str(v) -> str:
     if isinstance(v, int):
         return str(v)
     s = str(v).strip()
-    return "" if s.lower() in ("nan", "none") else s
+    if s.lower() in ("nan", "none") or s.lower() in _EXCEL_ERRORS:
+        return ""
+    return s
 
 
 def _norm_hora(v) -> str:
@@ -610,7 +614,7 @@ def _get_cargas_state():
 
 
 def _update_row(n: str, patch: dict):
-    allowed = {"cif", "agencia", "estado", "precintos_data", "muelle", "playa", "matriculas", "numsup_count", "ruta_carga"}
+    allowed = {"cif", "agencia", "estado", "precintos_data", "muelle", "playa", "matriculas", "numsup_count", "ruta_carga", "combined_count"}
     patch = {k: v for k, v in (patch or {}).items() if k in allowed}
     if not patch:
         return {"ok": True}
@@ -674,18 +678,47 @@ def _lookup_chf(matricula: str):
     return {"ok": True, "found": False, "error": "No encontrado"}
 
 
-def _count_gesupej(cod_centro: str, tipo_viaje: str = "ambiente"):
-    """Devuelve la cuenta de pales pendientes (GESUPEJ) para un cod_centro."""
+def _count_gesupej(cod_centro: str, tipo_viaje: str = "ambiente", col_w: str = ""):
+    """
+    Devuelve pales + ruta_carga para un cod_centro, igual que el desktop:
+      - numsup_count: GESUPEJ por codcli
+      - ruta_carga:   touliv1 ± 5 (o +1 para adelantados)
+      - combined_count: numsup + gesupe6 por ruta
+    """
     try:
         s = str(cod_centro or "").strip()
         codcli = str(int(float(s))).zfill(8) if s else ""
     except (ValueError, TypeError):
         codcli = str(cod_centro or "").strip()
     if not codcli:
-        return {"ok": True, "numsup_count": 0}
+        return {"ok": True, "numsup_count": 0, "ruta_carga": None, "combined_count": None}
+
     ambiente = str(tipo_viaje or "").lower() == "ambiente"
-    count = C.count_gesupej(codcli, "true" if ambiente else "false")
-    return {"ok": True, "numsup_count": count}
+    codact = "101" if ambiente else "003"
+    ambi_str = "true" if ambiente else "false"
+    is_adelantado = str(col_w or "").strip().upper() == "A"
+
+    numsup = C.count_gesupej(codcli, ambi_str)
+
+    # Obtener ruta_carga a partir de touliv1 (igual que desktop)
+    ruta_carga = None
+    combined_count = numsup
+    try:
+        touliv1_raw = C.lookup_touliv1(codcli, codact)
+        if touliv1_raw:
+            touliv1 = int(float(touliv1_raw))
+            ruta_carga = touliv1 + 1 if is_adelantado else touliv1 - 5
+            gesupe6 = C.count_gesupe6(str(ruta_carga))
+            combined_count = numsup + gesupe6
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "numsup_count": numsup,
+        "ruta_carga": ruta_carga,
+        "combined_count": combined_count,
+    }
 
 
 # ── CSV export ────────────────────────────────────────────────────────────

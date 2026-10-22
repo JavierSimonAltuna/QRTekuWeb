@@ -321,8 +321,8 @@ const QRTekuApp = () => {
           ? window.api.call("lookup_chf", matricula)
           : Promise.resolve({ ok: false }),
         row.cod_centro
-          ? window.api.call("count_gesupej", row.cod_centro, row.tipo_viaje || "ambiente")
-          : Promise.resolve({ ok: true, numsup_count: 0 }),
+          ? window.api.call("count_gesupej", row.cod_centro, row.tipo_viaje || "ambiente", row.col_w || "")
+          : Promise.resolve({ ok: true, numsup_count: 0, ruta_carga: null, combined_count: null }),
       ]);
       setLoadingOdbc(false);
 
@@ -337,10 +337,16 @@ const QRTekuApp = () => {
         window.api.call("update_row", row.n, { estado: "missing-cif" }).catch(() => {});
       }
 
-      // Actualizar pales para cualquier camión (aculado o no)
-      if (countRes.ok && countRes.numsup_count > 0) {
-        setRows((rs) => rs.map((r) => (r.n === row.n ? { ...r, numsup_count: countRes.numsup_count } : r)));
-        window.api.call("update_row", row.n, { numsup_count: countRes.numsup_count }).catch(() => {});
+      // Actualizar pales + ruta para cualquier camión (aculado o no)
+      if (countRes.ok) {
+        const patch = {};
+        if (countRes.numsup_count > 0) patch.numsup_count = countRes.numsup_count;
+        if (countRes.combined_count > 0) patch.combined_count = countRes.combined_count;
+        if (countRes.ruta_carga != null) patch.ruta_carga = countRes.ruta_carga;
+        if (Object.keys(patch).length > 0) {
+          setRows((rs) => rs.map((r) => (r.n === row.n ? { ...r, ...patch } : r)));
+          window.api.call("update_row", row.n, patch).catch(() => {});
+        }
       }
     } catch (err) {
       setLoadingOdbc(false);
