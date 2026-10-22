@@ -3,12 +3,21 @@ PULSO · Llamadas al AS400 via FastAPI bridge
 =============================================
 La URL y el token se leen desde Firestore (config/api)
 para poder modificarlos desde la app sin redesplegar.
+
+Endpoints FastAPI (todos GET con Authorization: Bearer <token>):
+  GET /api/pulso/gezcam/lookup?matricula=XXX
+  GET /api/pulso/gecli2/cif?codcli=XXX
+  GET /api/pulso/gecli2/touliv1?codcli=XXX&codact=101
+  GET /api/pulso/gesupe6/count?touliv=XXX
+  GET /api/pulso/gesupej/count?codcli=XXX&ambiente=true
+  GET /api/pulso/gezcat
 """
 
 from __future__ import annotations
 
 import json
 import urllib.request
+import urllib.parse
 
 _cfg_cache: dict | None = None
 
@@ -40,58 +49,55 @@ def _api_token() -> str:
     return _load_cfg().get("api_token") or ""
 
 
-def _call(method: str, *args) -> dict | None:
-    """POST /api/<method> {args:[...], kwargs:{}} — mismo protocolo que api-shim.js del desktop."""
+def _get(path: str, params: dict | None = None) -> dict | None:
+    """GET /path?params con Authorization: Bearer <token>."""
     url_base = _api_url()
     token = _api_token()
     if not url_base or not token:
         return None
     try:
-        url = url_base.rstrip("/") + "/api/" + method
-        body = json.dumps({"args": list(args), "kwargs": {}}, ensure_ascii=False).encode("utf-8")
+        url = url_base + path
+        if params:
+            url += "?" + urllib.parse.urlencode(params)
         req = urllib.request.Request(
             url,
-            data=body,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
+            headers={"Authorization": f"Bearer {token}"},
         )
         with urllib.request.urlopen(req, timeout=8) as resp:
             return json.loads(resp.read().decode())
     except Exception as e:
-        print(f"[core_ops] _call {method}: {e}")
+        print(f"[core_ops] _get {path}: {e}")
         return None
 
 
 def _norm_tractor(s: str) -> str:
-    """Normaliza matrícula igual que el desktop: mayúsculas, sin espacios ni guiones."""
+    """Normaliza matrícula: mayúsculas, sin espacios ni guiones."""
     return (s or "").upper().replace(" ", "").replace("-", "").strip()
 
 
 def _parse_chf_response(data: dict) -> dict:
-    """Extrae cif/agencia de respuesta del bridge (anidada o plana)."""
-    if not (data and data.get("ok")):
+    """Extrae cif/agencia de respuesta del bridge. Verifica ok y found."""
+    if not (data and data.get("ok") and data.get("found")):
         return {}
-    nested = data.get("data")
-    if isinstance(nested, dict) and nested:
-        return nested
-    flat = {k: v for k, v in data.items() if k not in ("ok", "error", "data", "found")}
-    return flat if flat else {}
+    cif = str(data.get("cif") or "").strip()
+    agencia = str(data.get("agencia") or "").strip()
+    if not (cif and agencia):
+        return {}
+    return {"cif": cif, "agencia": agencia}
 
 
 def lookup_chf(matricula: str) -> dict:
     if not matricula:
         return {}
-    # El bridge normaliza internamente; enviamos la matrícula tal cual
-    data = _call("lookup_chf", matricula)
+    tractora_norm = _norm_tractor(matricula)
+    data = _get("/api/pulso/gezcam/lookup", {"matricula": tractora_norm})
     result = _parse_chf_response(data)
     if result:
         return result
-    # Intento 2: matrícula normalizada (sin guiones ni espacios) por si acaso
-    tractora_norm = _norm_tractor(matricula)
-    if tractora_norm != matricula.upper().strip():
-        data2 = _call("lookup_chf", tractora_norm)
+    # Intento con matrícula original si es diferente de la normalizada
+    orig = matricula.upper().strip()
+    if orig != tractora_norm:
+        data2 = _get("/api/pulso/gezcam/lookup", {"matricula": orig})
         result2 = _parse_chf_response(data2)
         if result2:
             return result2
@@ -101,46 +107,52 @@ def lookup_chf(matricula: str) -> dict:
 def lookup_client(codcli: str) -> dict:
     if not codcli:
         return {}
-    data = _call("lookup_client", codcli)
-    if data and data.get("ok"):
-        nested = data.get("data")
-        if isinstance(nested, dict):
-            return nested
-        return {k: v for k, v in data.items() if k not in ("ok", "error")}
+    data = _get("/api/pulso/gecli2/cif", {"codcli": codcli})
+    if data and data.get("ok") and data.get("found"):
+        return {"cif": str(data.get("cif") or ""), "nombre": str(data.get("agencia") or "")}
     return {}
 
 
 def load_gezcat() -> dict:
-    data = _call("load_gezcat")
+    """Devuelve dict {catcli: libcat} con la tabla GEZCAT completa."""
+    data = _get("/api/pulso/gezcat")
     if data and data.get("ok"):
-        nested = data.get("data")
-        if isinstance(nested, dict):
-            return nested
+        items = data.get("data") or []
+        if isinstance(items, list):
+            return {item.get("catcli"): item.get("libcat") for item in items if item.get("catcli")}
     return {}
 
 
-def lookup_touliv1(codcli: str, codact: str) -> str:
+def lookup_touliv1(codcli: str, codact: str = "101") -> str:
+    """Devuelve TOULIV1 como string, o '' si no se encuentra."""
     if not codcli:
         return ""
-    data = _call("lookup_touliv1", codcli, codact)
-    if data and data.get("ok"):
-        return str(data.get("touliv1", ""))
+    data = _get("/api/pulso/gecli2/touliv1", {"codcli": codcli, "codact": codact})
+    if data and data.get("ok") and data.get("found"):
+        v = data.get("touliv1")
+        return str(int(v)) if v is not None else ""
     return ""
 
 
 def count_gesupe6(ruta: str) -> int:
+    """Cuenta pales en GESUPE6 WHERE TOULIV=ruta. El param del endpoint es 'touliv'."""
     if not ruta:
         return 0
-    data = _call("count_gesupe6", ruta)
+    try:
+        touliv = int(float(str(ruta)))
+    except (ValueError, TypeError):
+        return 0
+    data = _get("/api/pulso/gesupe6/count", {"touliv": touliv})
     if data and data.get("ok"):
         return int(data.get("count", 0))
     return 0
 
 
-def count_gesupej(codcli: str, ambiente: str) -> int:
+def count_gesupej(codcli: str, ambiente: str = "true") -> int:
+    """Cuenta pales en GESUPEJ. ambiente='true'|'false'."""
     if not codcli:
         return 0
-    data = _call("count_gesupej", codcli, ambiente)
+    data = _get("/api/pulso/gesupej/count", {"codcli": codcli, "ambiente": ambiente})
     if data and data.get("ok"):
         return int(data.get("count", 0))
     return 0
@@ -159,15 +171,9 @@ def test_connection() -> dict:
         return {"ok": False, "error": "Token no configurado"}
     import urllib.error
     try:
-        # Usamos app_info que siempre está disponible en el bridge
-        body = json.dumps({"args": [], "kwargs": {}}).encode("utf-8")
         req = urllib.request.Request(
-            url.rstrip("/") + "/api/app_info",
-            data=body,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
+            url.rstrip("/") + "/api/test/pulso/infolog",
+            headers={"Authorization": f"Bearer {token}"},
         )
         with urllib.request.urlopen(req, timeout=8) as resp:
             json.loads(resp.read().decode())
