@@ -169,6 +169,13 @@ def test_connection() -> dict:
         return {"ok": False, "error": "URL no configurada"}
     if not token:
         return {"ok": False, "error": "Token no configurado"}
+    # Verificar que el token no contiene caracteres de máscara (•)
+    if "•" in token:
+        return {
+            "ok": False,
+            "error": "El token guardado contiene caracteres de máscara (•). "
+                     "Introduce el token real en el campo y guarda de nuevo.",
+        }
     import urllib.error
     try:
         req = urllib.request.Request(
@@ -176,14 +183,24 @@ def test_connection() -> dict:
             headers={"Authorization": f"Bearer {token}"},
         )
         with urllib.request.urlopen(req, timeout=8) as resp:
-            json.loads(resp.read().decode())
-            return {"ok": True, "message": "API conectada correctamente"}
+            infolog_data = json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
             return {"ok": False, "error": f"Token inválido (HTTP {e.code})"}
-        return {"ok": False, "error": f"Error HTTP {e.code}"}
+        return {"ok": False, "error": f"Error HTTP {e.code} en /api/test/pulso/infolog"}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": f"No se puede conectar con la API: {e}"}
+
+    # Prueba real: lookup de matrícula de test en GEZCAM
+    gezcam_test = _get("/api/pulso/gezcam/lookup", {"matricula": "TEST"})
+
+    return {
+        "ok": True,
+        "message": "API conectada correctamente",
+        "infolog": infolog_data,
+        "gezcam_test": gezcam_test,
+        "api_url": url,
+    }
 
 
 def diagnostics() -> dict:
@@ -217,8 +234,8 @@ def save_api_config(api_url: str, api_token: str = "") -> dict:
         current = existing.to_dict() if existing.exists else {}
 
         new_url = (api_url or "").rstrip("/").strip()
-        # Si el token recibido es solo puntos (enmascarado), mantener el actual
-        if api_token and not all(c == "•" for c in api_token):
+        # Si el token contiene el carácter de máscara (•), mantener el actual
+        if api_token and "•" not in api_token:
             new_token = api_token.strip()
         else:
             new_token = current.get("api_token", "")
