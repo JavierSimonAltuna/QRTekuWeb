@@ -55,7 +55,7 @@ ALLOWED_METHODS = {
     "loader_login", "loader_current", "loader_request_next",
     "loader_refresh_precintos", "loader_finish", "loader_set_muelle",
     # Cargas (supervisor)
-    "load_excel_base64", "reload_excel", "lookup_chf", "count_gesupej",
+    "load_excel_base64", "reload_excel", "clear_excel", "lookup_chf", "count_gesupej",
     "get_cargas_state", "update_row",
     # Cola
     "queue_snapshot", "queue_enqueue_manual", "queue_remove", "queue_reassign",
@@ -587,6 +587,15 @@ def _reload_excel():
     }
 
 
+def _clear_excel():
+    """Elimina la sesión activa de Firestore (limpia el plan de carga)."""
+    try:
+        _cargas_doc().delete()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 def _get_cargas_state():
     doc = _cargas_doc().get()
     if not doc.exists:
@@ -944,6 +953,7 @@ HANDLERS = {
     "loader_remove":            lambda *a, **k: _loader_remove(*a, **k),
     "load_excel_base64":        lambda *a, **k: _load_excel_base64(*a, **k),
     "reload_excel":             lambda *a, **k: _reload_excel(),
+    "clear_excel":              lambda *a, **k: _clear_excel(),
     "get_cargas_state":         lambda *a, **k: _get_cargas_state(),
     "update_row":               lambda *a, **k: _update_row(*a, **k),
     "get_excel_sessions":       lambda *a, **k: _get_excel_sessions(),

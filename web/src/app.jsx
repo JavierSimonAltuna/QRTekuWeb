@@ -465,6 +465,21 @@ const QRTekuApp = () => {
     }
   };
 
+  const handleClearExcel = async () => {
+    if (!window.confirm("¿Limpiar el plan de carga? Se borrarán las filas cargadas.")) return;
+    const res = await window.api.call("clear_excel");
+    if (res.ok) {
+      setRows([]);
+      setFileInfo(null);
+      setSelectedIdx(null);
+      setEditing({});
+      setExcelSessions([]);
+      pushToast("Plan de carga limpiado", "success");
+    } else {
+      pushToast(res.error || "Error al limpiar", "error");
+    }
+  };
+
   const handleConfirm = async (idx) => {
     const state = editing[idx];
     const errs = ["T", "R", "N", "D", "C", "E"].filter((k) => !state[k]);
@@ -612,6 +627,14 @@ const QRTekuApp = () => {
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: graphConfigured ? "#38bdf8" : "#57534e" }} />
             <span style={{ fontSize: 11, color: graphConfigured ? "#7dd3fc" : "rgba(255,255,255,0.45)", fontWeight: 600 }}>M365</span>
           </button>
+          {/* Botón limpiar plan de carga */}
+          {hasFile && (
+            <button
+              onClick={handleClearExcel}
+              title="Limpiar plan de carga"
+              style={{ ...S.topIconBtn, fontSize: 12, color: "rgba(252,165,165,0.7)" }}
+            >✕</button>
+          )}
           {/* Botón tweaks */}
           <button
             onClick={() => window.postMessage({ type: "__activate_edit_mode" }, "*")}
