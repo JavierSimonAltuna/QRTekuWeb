@@ -28,6 +28,10 @@ const todayYMD = () => {
   const d = new Date();
   return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
 };
+const fecToDisplay = (ymd) => {
+  if (!ymd || ymd.length !== 8) return ymd;
+  return `${ymd.slice(6, 8)}/${ymd.slice(4, 6)}/${ymd.slice(0, 4)}`;
+};
 
 // ───────────────────────────────────────────────────────────────────
 // App
@@ -55,6 +59,8 @@ const QRTekuApp = () => {
   const [excelSessions, setExcelSessions] = useState([]);
   const [showExcelPicker, setShowExcelPicker] = useState(false);
   const [serverInfo, setServerInfo] = useState(null);
+  const [selectedFecha, setSelectedFecha] = useState(todayYMD());
+  const [availableDates, setAvailableDates] = useState([]);
   const prevAculadoCountRef = useRef(null); // para detectar nuevos acules en el polling HTTP
   const audioCtxRef = useRef(null);         // AudioContext persistente (se desbloquea con el primer clic)
   const winW = useWindowWidth();
@@ -169,7 +175,7 @@ const QRTekuApp = () => {
     let tid = null;
     const tick = async () => {
       try {
-        const res = await window.api.call("reload_excel");
+        const res = await window.api.call("reload_excel", selectedFecha);
         if (alive && res && res.ok) {
           setRows((prevRows) => {
             const doneSet = new Set(prevRows.filter((r) => r.estado === "done").map((r) => r.n));
@@ -203,7 +209,7 @@ const QRTekuApp = () => {
     };
     tid = setTimeout(tick, 5000);
     return () => { alive = false; clearTimeout(tid); };
-  }, [connected, tw.autoRefresh, fileInfo]);
+  }, [connected, tw.autoRefresh, fileInfo, selectedFecha]);
 
   // ── Sincronización de cargas desde navegador/tablet ───────────────────
   // Polling cada 5s. Usa get_cargas_state (ligero, sin ODBC) con fallback
@@ -219,9 +225,9 @@ const QRTekuApp = () => {
       if (!isDesktop) {
         try {
           let res = null;
-          try { res = await window.api.call("get_cargas_state"); } catch (_) {}
+          try { res = await window.api.call("get_cargas_state", selectedFecha); } catch (_) {}
           if (!res || !res.ok) {
-            try { res = await window.api.call("reload_excel"); } catch (_) {}
+            try { res = await window.api.call("reload_excel", selectedFecha); } catch (_) {}
           }
           if (alive && res && res.ok) {
             const newAculCount = (res.rows || []).filter(r => r.aculado && !r.ya_cargado).length;
@@ -254,12 +260,27 @@ const QRTekuApp = () => {
     };
     tid = setTimeout(tick, 500); // primer tick a 500ms
     return () => { alive = false; clearTimeout(tid); };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedFecha]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Info del servidor (IP LAN, URLs) ──────────────────────────────────
   useEffect(() => {
     window.api.call("app_info").then(r => { if (r) setServerInfo(r); }).catch(() => {});
-  }, []);
+    loadAvailableDates();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Cargar plan al cambiar fecha seleccionada ────────────────────────
+  useEffect(() => {
+    if (!selectedFecha) return;
+    window.api.call("get_cargas_state", selectedFecha).then((res) => {
+      if (res && res.ok && res.rows) {
+        setRows(res.rows);
+        setFileInfo({ name: res.filename, count: res.count, fecha: selectedFecha, path: res.filename });
+      } else {
+        setRows([]);
+        setFileInfo(null);
+      }
+    }).catch(() => {});
+  }, [selectedFecha]);
 
   // ── Estado Graph / SharePoint ─────────────────────────────────────────
   useEffect(() => {
@@ -356,12 +377,12 @@ const QRTekuApp = () => {
       if (res.ok && res.found) {
         setEditing((e) => ({ ...e, [idx]: { ...e[idx], C: res.cif, E: res.agencia, odbcDone: true, odbcFound: true } }));
         pushToast(`CIF + Agencia: ${res.cif} · ${res.agencia}`, "success");
-        window.api.call("update_row", row.n, { cif: res.cif, agencia: res.agencia }).catch(() => {});
+        window.api.call("update_row", row.n, { cif: res.cif, agencia: res.agencia }, selectedFecha).catch(() => {});
       } else if (matricula) {
         setEditing((e) => ({ ...e, [idx]: { ...e[idx], odbcDone: true, odbcFound: false } }));
         pushToast(`No se encontró ${matricula} en GEZCAM`, "error");
         setRows((rs) => rs.map((r) => (r.n === row.n ? { ...r, estado: "missing-cif" } : r)));
-        window.api.call("update_row", row.n, { estado: "missing-cif" }).catch(() => {});
+        window.api.call("update_row", row.n, { estado: "missing-cif" }, selectedFecha).catch(() => {});
       }
 
       // Actualizar pales + ruta para cualquier camión (aculado o no)
@@ -380,14 +401,14 @@ const QRTekuApp = () => {
               return { ...r, ...patch };
             return r;
           }));
-          window.api.call("update_row", row.n, patch).catch(() => {});
+          window.api.call("update_row", row.n, patch, selectedFecha).catch(() => {});
         }
       }
     } catch (err) {
       setLoadingOdbc(false);
       pushToast(`ODBC error: ${err.message || err}`, "error");
     }
-  }, [pushToast]);
+  }, [pushToast, selectedFecha]);
 
   const selectRow = useCallback((idx) => {
     if (idx === selectedIdx) { setSelectedIdx(null); setTabletPane("list"); return; }
@@ -477,14 +498,23 @@ const QRTekuApp = () => {
 
       // Persistir en Firestore para que el polling los vea (1 write para todas las filas)
       if (Object.keys(rowPatches).length) {
-        window.api.call("bulk_update_rows", rowPatches).catch(() => {});
+        window.api.call("bulk_update_rows", rowPatches, selectedFecha).catch(() => {});
       }
+    } catch (_) {}
+  }, [selectedFecha]);
+
+  const loadAvailableDates = useCallback(async () => {
+    try {
+      const r = await window.api.call("list_cargas_dates");
+      if (r && r.ok) setAvailableDates(r.dates || []);
     } catch (_) {}
   }, []);
 
   const applyExcelResult = useCallback((res, path) => {
+    const fecha = res.fecha || res.fecha_b2 || todayYMD();
+    setSelectedFecha(fecha);
     setRows(res.rows);
-    setFileInfo({ name: res.filename, count: res.count, fecha: res.fecha_b2, path: path || res.filename });
+    setFileInfo({ name: res.filename, count: res.count, fecha: fecha, path: path || res.filename });
     setSelectedIdx(null);
     setEditing({});
     if (res.auto_enqueued > 0) {
@@ -493,9 +523,10 @@ const QRTekuApp = () => {
     if (res.auto_enqueue_error) {
       pushToast(`Error al encolar: ${res.auto_enqueue_error}`, "error");
     }
+    loadAvailableDates();
     // Cargar pales de todos los centros en segundo plano
     loadPalesBulk(res.rows || []);
-  }, [pushToast, loadPalesBulk]);
+  }, [pushToast, loadPalesBulk, loadAvailableDates]);
 
   const handleImport = async () => {
     if (apiReady()) {
@@ -539,7 +570,7 @@ const QRTekuApp = () => {
   };
 
   const handleReload = async () => {
-    const res = await window.api.call("reload_excel");
+    const res = await window.api.call("reload_excel", selectedFecha);
     if (res.ok) {
       applyExcelResult(res);
       pushToast("Excel recargado", "success");
@@ -551,13 +582,14 @@ const QRTekuApp = () => {
 
   const handleClearExcel = async () => {
     if (!window.confirm("¿Limpiar el plan de carga? Se borrarán las filas cargadas.")) return;
-    const res = await window.api.call("clear_excel");
+    const res = await window.api.call("clear_excel", selectedFecha);
     if (res.ok) {
       setRows([]);
       setFileInfo(null);
       setSelectedIdx(null);
       setEditing({});
       setExcelSessions([]);
+      loadAvailableDates();
       pushToast("Plan de carga limpiado", "success");
     } else {
       pushToast(res.error || "Error al limpiar", "error");
@@ -591,7 +623,7 @@ const QRTekuApp = () => {
       cif: state.C || "",
       agencia: state.E || "",
       precintos_data: precintos,
-    }).catch(() => {});
+    }, selectedFecha).catch(() => {});
     setSelectedIdx(null);
   };
 
@@ -788,6 +820,28 @@ const QRTekuApp = () => {
         <QueuePanel pushToast={pushToast} />
       ) : (
         <>
+          {/* ─── Selector de fecha ──────────────────────────────── */}
+          {availableDates.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderBottom: "1px solid var(--border, #e7e5e4)", background: "var(--bg2, #fafaf9)", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11, color: "var(--fg2, #78716c)", fontWeight: 600, marginRight: 2 }}>PLAN:</span>
+              {availableDates.map((d) => (
+                <button
+                  key={d.fecha}
+                  onClick={() => setSelectedFecha(d.fecha)}
+                  style={{
+                    padding: "2px 10px", borderRadius: 12, border: "1px solid var(--border, #e7e5e4)",
+                    background: d.fecha === selectedFecha ? "#dc2626" : "var(--bg, #fff)",
+                    color: d.fecha === selectedFecha ? "#fff" : "var(--fg, #292524)",
+                    fontSize: 12, cursor: "pointer", fontWeight: d.fecha === selectedFecha ? 700 : 400,
+                    transition: "all 0.15s", fontFamily: "inherit",
+                  }}
+                  title={d.filename}
+                >
+                  {fecToDisplay(d.fecha)}
+                </button>
+              ))}
+            </div>
+          )}
           {/* Stats strip */}
           <div style={S.statStrip}>
             <StatItem label="Pendientes"  value={stats.ready || 0}  />

@@ -41,8 +41,15 @@ def _db():
     return fs_admin.client()
 
 
-def _cargas_doc():
-    return _db().collection("cargas").document("active")
+def _cargas_doc(fecha=None):
+    if not fecha:
+        fecha = datetime.now(timezone.utc).strftime("%Y%m%d")
+    return _db().collection("cargas").document(str(fecha))
+
+
+def _cargas_index_doc():
+    """Índice ligero: {YYYYMMDD: {filename, count, loaded_at}}"""
+    return _db().collection("cargas").document("_index")
 
 
 def _cargas_sessions_col():
@@ -56,7 +63,7 @@ ALLOWED_METHODS = {
     "loader_refresh_precintos", "loader_finish", "loader_set_muelle",
     # Cargas (supervisor)
     "load_excel_base64", "reload_excel", "clear_excel", "lookup_chf", "count_gesupej",
-    "get_cargas_state", "update_row", "bulk_update_rows", "count_gesupej_bulk",
+    "get_cargas_state", "update_row", "bulk_update_rows", "list_cargas_dates", "count_gesupej_bulk",
     # Cola
     "queue_snapshot", "queue_enqueue_manual", "queue_remove", "queue_reassign",
     "queue_set_urgent", "queue_set_comment", "queue_set_traffic_comment",
@@ -537,15 +544,20 @@ def _load_excel_base64(filename: str, b64_content: str):
         now = _now_iso()
         fs_error = None
 
-        # Guardar en Firestore (sesión activa)
+        # Guardar en Firestore (doc keyed por fecha_b2)
         try:
-            _cargas_doc().set({
+            _cargas_doc(fecha_b2).set({
                 "session_id": session_id,
                 "filename": filename,
                 "loaded_at": now,
                 "rows": rows,
                 "count": len(rows),
+                "fecha": fecha_b2,
             })
+            # Actualizar índice de fechas disponibles
+            _cargas_index_doc().set({
+                fecha_b2: {"filename": filename, "count": len(rows), "loaded_at": now}
+            }, merge=True)
             # Historial: solo metadata (rows no caben en 1 doc si hay > 600 filas)
             _cargas_sessions_col().document(session_id).set({
                 "session_id": session_id,
@@ -594,7 +606,7 @@ def _load_excel_base64(filename: str, b64_content: str):
         result = {
             "ok": True, "rows": rows, "filename": filename,
             "count": len(rows), "auto_enqueued": auto_count,
-            "session_id": session_id, "fecha_b2": fecha_b2,
+            "session_id": session_id, "fecha_b2": fecha_b2, "fecha": fecha_b2,
         }
         if fs_error:
             result["warning"] = f"Datos cargados pero no persistidos: {fs_error}"
@@ -605,8 +617,8 @@ def _load_excel_base64(filename: str, b64_content: str):
         return {"ok": False, "error": str(e)}
 
 
-def _reload_excel():
-    doc = _cargas_doc().get()
+def _reload_excel(fecha=None):
+    doc = _cargas_doc(fecha).get()
     if not doc.exists:
         return {"ok": False, "error": "no_file"}
     session = doc.to_dict()
@@ -615,21 +627,31 @@ def _reload_excel():
         "rows": session.get("rows", []),
         "filename": session.get("filename", ""),
         "count": session.get("count", 0),
+        "fecha": session.get("fecha", fecha),
         "auto_enqueued": 0,
     }
 
 
-def _clear_excel():
-    """Elimina la sesión activa de Firestore (limpia el plan de carga)."""
+def _clear_excel(fecha=None):
+    """Elimina el plan de carga de una fecha de Firestore."""
     try:
-        _cargas_doc().delete()
+        doc_ref = _cargas_doc(fecha)
+        doc = doc_ref.get()
+        fecha_key = doc.to_dict().get("fecha", fecha) if doc.exists else fecha
+        doc_ref.delete()
+        # Quitar del índice
+        if fecha_key:
+            try:
+                _cargas_index_doc().update({fecha_key: fs_admin.DELETE_FIELD})
+            except Exception:
+                pass
         return {"ok": True}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
 
-def _get_cargas_state():
-    doc = _cargas_doc().get()
+def _get_cargas_state(fecha=None):
+    doc = _cargas_doc(fecha).get()
     if not doc.exists:
         return {"ok": False, "error": "no_file"}
     session = doc.to_dict()
@@ -638,15 +660,17 @@ def _get_cargas_state():
         "rows": session.get("rows", []),
         "filename": session.get("filename", ""),
         "count": session.get("count", 0),
+        "fecha": session.get("fecha", fecha),
     }
 
 
-def _update_row(n: str, patch: dict):
+def _update_row(n: str, patch: dict, fecha=None):
     allowed = {"cif", "agencia", "estado", "precintos_data", "muelle", "playa", "matriculas", "numsup_count", "ruta_carga", "combined_count"}
     patch = {k: v for k, v in (patch or {}).items() if k in allowed}
     if not patch:
         return {"ok": True}
-    doc = _cargas_doc().get()
+    doc_ref = _cargas_doc(fecha)
+    doc = doc_ref.get()
     if not doc.exists:
         return {"ok": False, "error": "no_file"}
     session = doc.to_dict()
@@ -655,19 +679,19 @@ def _update_row(n: str, patch: dict):
     for row in rows:
         if str(row.get("n", "")) == n:
             row.update(patch)
-            _cargas_doc().update({"rows": rows})
+            doc_ref.update({"rows": rows})
             return {"ok": True}
     return {"ok": False, "error": "row_not_found"}
 
 
-def _bulk_update_rows(updates: dict):
+def _bulk_update_rows(updates: dict, fecha=None):
     """Actualiza múltiples filas en una sola lectura/escritura de Firestore.
     updates: {"n": {"numsup_count": x, "ruta_carga": y, ...}}
     """
     if not updates:
         return {"ok": True, "updated": 0}
     allowed = {"cif", "agencia", "estado", "precintos_data", "muelle", "playa", "matriculas", "numsup_count", "ruta_carga", "combined_count"}
-    doc_ref = _cargas_doc()
+    doc_ref = _cargas_doc(fecha)
     doc = doc_ref.get()
     if not doc.exists:
         return {"ok": False, "error": "no_file"}
@@ -687,6 +711,20 @@ def _bulk_update_rows(updates: dict):
     if updated:
         doc_ref.update({"rows": rows})
     return {"ok": True, "updated": updated}
+
+
+def _list_cargas_dates():
+    doc = _cargas_index_doc().get()
+    if not doc.exists:
+        return {"ok": True, "dates": []}
+    index = doc.to_dict() or {}
+    dates = sorted(
+        [{"fecha": k, **v} for k, v in index.items()
+         if isinstance(k, str) and k.isdigit() and len(k) == 8],
+        key=lambda x: x["fecha"],
+        reverse=True,
+    )
+    return {"ok": True, "dates": dates}
 
 
 def _get_excel_sessions():
@@ -819,8 +857,8 @@ def _count_gesupej_bulk(entries: list) -> dict:
 
 
 # ── CSV export ────────────────────────────────────────────────────────────
-def _export_cargas_csv():
-    doc = _cargas_doc().get()
+def _export_cargas_csv(fecha=None):
+    doc = _cargas_doc(fecha).get()
     if not doc.exists:
         return {"ok": False, "error": "no_file"}
     rows = doc.to_dict().get("rows", [])
@@ -1083,17 +1121,18 @@ HANDLERS = {
     "loader_upsert":            lambda *a, **k: _loader_upsert(*a, **k),
     "loader_remove":            lambda *a, **k: _loader_remove(*a, **k),
     "load_excel_base64":        lambda *a, **k: _load_excel_base64(*a, **k),
-    "reload_excel":             lambda *a, **k: _reload_excel(),
-    "clear_excel":              lambda *a, **k: _clear_excel(),
-    "get_cargas_state":         lambda *a, **k: _get_cargas_state(),
+    "reload_excel":             lambda *a, **k: _reload_excel(*a, **k),
+    "clear_excel":              lambda *a, **k: _clear_excel(*a, **k),
+    "get_cargas_state":         lambda *a, **k: _get_cargas_state(*a, **k),
     "update_row":               lambda *a, **k: _update_row(*a, **k),
     "bulk_update_rows":         lambda *a, **k: _bulk_update_rows(*a, **k),
+    "list_cargas_dates":        lambda *a, **k: _list_cargas_dates(),
     "get_excel_sessions":       lambda *a, **k: _get_excel_sessions(),
     "switch_excel_session":     lambda *a, **k: _switch_excel_session(*a, **k),
     "lookup_chf":               lambda *a, **k: _lookup_chf(*a, **k),
     "count_gesupej":            lambda *a, **k: _count_gesupej(*a, **k),
     "count_gesupej_bulk":       lambda *a, **k: _count_gesupej_bulk(*a, **k),
-    "export_cargas_csv":        lambda *a, **k: _export_cargas_csv(),
+    "export_cargas_csv":        lambda *a, **k: _export_cargas_csv(*a, **k),
     "app_info":                 lambda *a, **k: _app_info(),
     "get_odbc_diagnostics":     lambda *a, **k: _get_odbc_diagnostics(),
     "get_debug_log":            lambda *a, **k: _get_debug_log(*a, **k),
