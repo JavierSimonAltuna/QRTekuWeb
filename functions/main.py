@@ -71,7 +71,7 @@ ALLOWED_METHODS = {
     "queue_reset_done", "queue_reset_queued", "queue_update_ruta",
     "queue_block", "queue_unblock", "queue_assign_helper", "queue_remove_helper",
     "queue_set_load_start", "queue_set_load_end", "queue_change_queue_type",
-    "export_cargas_csv",
+    "export_cargas_csv", "export_queue_csv",
     # Cargadores (gestión)
     "loader_upsert", "loader_remove",
     # Info / diagnóstico
@@ -503,6 +503,22 @@ def _parse_excel_bytes(data: bytes, filename: str) -> tuple:
             "estado": "ready" if destino else "missing-cif",
         })
 
+    # Construir precintos_data: agrupa todos los precintos de filas con el mismo n
+    precintos_by_n: dict = {}
+    for row in rows:
+        n = row.get("n", "")
+        if n and row.get("precinto"):
+            if n not in precintos_by_n:
+                precintos_by_n[n] = []
+            precintos_by_n[n].append({
+                "precinto": row["precinto"],
+                "playa": row.get("playa", ""),
+                "cod_centro": row.get("cod_centro", ""),
+                "destino": row.get("destino", ""),
+            })
+    for row in rows:
+        row["precintos_data"] = precintos_by_n.get(row.get("n", ""), [])
+
     # Deduplicar por (destino, n)
     seen_n: set = set()
     deduped = []
@@ -666,7 +682,8 @@ def _get_cargas_state(fecha=None):
 
 
 def _update_row(n: str, patch: dict, fecha=None):
-    allowed = {"cif", "agencia", "estado", "precintos_data", "muelle", "playa", "matriculas", "numsup_count", "ruta_carga", "combined_count"}
+    allowed = {"cif", "agencia", "estado", "precintos_data", "muelle", "playa", "matriculas",
+               "numsup_count", "ruta_carga", "combined_count", "hora_acule", "aculado", "ya_cargado"}
     patch = {k: v for k, v in (patch or {}).items() if k in allowed}
     if not patch:
         return {"ok": True}
@@ -691,7 +708,8 @@ def _bulk_update_rows(updates: dict, fecha=None):
     """
     if not updates:
         return {"ok": True, "updated": 0}
-    allowed = {"cif", "agencia", "estado", "precintos_data", "muelle", "playa", "matriculas", "numsup_count", "ruta_carga", "combined_count"}
+    allowed = {"cif", "agencia", "estado", "precintos_data", "muelle", "playa", "matriculas",
+               "numsup_count", "ruta_carga", "combined_count", "hora_acule", "aculado", "ya_cargado"}
     doc_ref = _cargas_doc(fecha)
     doc = doc_ref.get()
     if not doc.exists:
@@ -858,6 +876,11 @@ def _count_gesupej_bulk(entries: list) -> dict:
 
 
 # ── CSV export ────────────────────────────────────────────────────────────
+def _export_queue_csv():
+    """Exporta todos los items de la cola (activos + completados) con tiempos y cargadores."""
+    return Q.export_queue_csv()
+
+
 def _export_cargas_csv(fecha=None):
     doc = _cargas_doc(fecha).get()
     if not doc.exists:
@@ -1259,6 +1282,7 @@ HANDLERS = {
     "count_gesupej":            lambda *a, **k: _count_gesupej(*a, **k),
     "count_gesupej_bulk":       lambda *a, **k: _count_gesupej_bulk(*a, **k),
     "export_cargas_csv":        lambda *a, **k: _export_cargas_csv(*a, **k),
+    "export_queue_csv":         lambda *a, **k: _export_queue_csv(),
     "app_info":                 lambda *a, **k: _app_info(),
     "get_odbc_diagnostics":     lambda *a, **k: _get_odbc_diagnostics(),
     "get_debug_log":            lambda *a, **k: _get_debug_log(*a, **k),

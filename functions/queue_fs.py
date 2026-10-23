@@ -174,45 +174,64 @@ def enqueue_manual(row: dict, urgente: bool = False) -> dict:
     # Extraer tractora/remolque de matriculas si no vienen ya separados
     _matriculas = str(row.get("matriculas") or "")
     _partes = [p.strip() for p in _matriculas.split("/")]
-    tractora = str(row.get("tractora") or _partes[0] if _partes else "")
+    tractora = str(row.get("tractora") or (_partes[0] if _partes else ""))
     remolque  = str(row.get("remolque") or (_partes[1] if len(_partes) > 1 else ""))
+
+    # mercancia_ok: si numsup_count se conoce en el momento del encolado, calcular
+    numsup_count = row.get("numsup_count")
+    merch_threshold = int(row.get("merch_threshold") or 25)
+    if numsup_count is not None:
+        mercancia_ok = int(numsup_count) >= merch_threshold
+        initial_status = "queued" if mercancia_ok else "pending_merch"
+    else:
+        initial_status = "queued"
 
     item_id = f"M-{counter:04d}-{now[:10]}"
     item = {
         "id": item_id,
         "source": "manual",
-        "status": "queued",
+        "status": initial_status,
         "queue_type": qt,
         "urgente": bool(urgente),
         "queued_at": now,
         "finished_at": None,
+        "completed_at": None,
+        "completed_muelle": None,
         "blocked": False,
         "comment": "",
         "traffic_comment": "",
         "supervisor_files": [],
         "helper_loader_id": None,
+        "reserved_for": None,
         "load_start_at": None,
         "load_end_at": None,
+        "assigned_at": None,
         "ruta": str(row.get("ruta") or ""),
         "pallets": str(row.get("pallets") or ""),
         "muelle": str(row.get("muelle") or ""),
         "playa": str(row.get("playa") or ""),
         "hora_salida": str(row.get("hora_salida") or ""),
-        "cam": str(row.get("cam") or ""),
+        "hora_acule": str(row.get("hora_acule") or ""),
+        "cam": str(row.get("cam") or row.get("orden") or ""),
         "tractora": tractora,
         "remolque": remolque,
         "destino": str(row.get("destino") or ""),
         "codcli": str(row.get("codcli") or ""),
         "agencia": str(row.get("agencia") or ""),
+        "expedicion": str(row.get("expedicion") or ""),
+        "cod_centro": str(row.get("cod_centro") or ""),
+        "viaje_n": str(row.get("n") or row.get("viaje_n") or ""),
+        "fecha": str(row.get("fecha") or ""),
         "tipo_carga": ("CONGELADO" if qt == "congelado" else
                        "REFRIGERADO" if qt == "refrigerado" else "AMBIENTE"),
         "loader_id": None,
         "loader_name": None,
-        "numsup_count": None,
-        "merch_threshold": 25,
+        "numsup_count": numsup_count,
+        "merch_threshold": merch_threshold,
+        "precintos_data": row.get("precintos_data") or [],
     }
     _items_col().document(item_id).set(item)
-    _audit("enqueue_manual", item_id, {"urgente": urgente})
+    _audit("enqueue_manual", item_id, {"urgente": urgente, "status": initial_status})
     return {"ok": True, "item": item}
 
 
@@ -229,12 +248,31 @@ def reassign(item_id: str, loader_id: str) -> dict:
     if not loader_doc.exists:
         return {"ok": False, "error": "Cargador no encontrado"}
     loader = loader_doc.to_dict()
+
+    # Si el cargador está ocupado, reservar el item para él
+    busy = (
+        _items_col()
+        .where(filter=firestore.FieldFilter("status", "==", "assigned"))
+        .where(filter=firestore.FieldFilter("loader_id", "==", loader_id))
+        .limit(1)
+        .get()
+    )
+    if busy:
+        _items_col().document(item_id).update({
+            "loader_id": loader_id,
+            "loader_name": loader.get("name", loader_id),
+            "reserved_for": loader_id,
+        })
+        _audit("reassign_reserved", item_id, {"loader_id": loader_id})
+        return {"ok": True, "reserved": True}
+
     _items_col().document(item_id).update({
         "loader_id": loader_id,
         "loader_name": loader.get("name", loader_id),
+        "reserved_for": None,
     })
     _audit("reassign", item_id, {"loader_id": loader_id})
-    return {"ok": True}
+    return {"ok": True, "reserved": False}
 
 
 # ── Urgencia ───────────────────────────────────────────────────────────────
@@ -310,8 +348,21 @@ def set_load_end(item_id: str, loader_id: str) -> dict:
 
 # ── Ruta ───────────────────────────────────────────────────────────────────
 def update_ruta(item_id: str, ruta_carga: str) -> dict:
-    _items_col().document(item_id).update({"ruta": str(ruta_carga or "")})
-    return {"ok": True}
+    doc = _items_col().document(item_id).get()
+    if not doc.exists:
+        return {"ok": False, "error": "Item no encontrado"}
+    item = doc.to_dict()
+    updates = {"ruta": str(ruta_carga or "")}
+    # Si el item está en pending_merch y ya se conoce numsup_count, recalcular mercancia_ok
+    promoted = False
+    if item.get("status") == "pending_merch":
+        numsup = item.get("numsup_count")
+        threshold = int(item.get("merch_threshold") or 25)
+        if numsup is not None and int(numsup) >= threshold:
+            updates["status"] = "queued"
+            promoted = True
+    _items_col().document(item_id).update(updates)
+    return {"ok": True, "promoted": promoted}
 
 
 # ── Tipo de cola ───────────────────────────────────────────────────────────
@@ -360,6 +411,36 @@ def reset_queued(queue_type: str = None) -> dict:
 
 
 # ── Audit log ─────────────────────────────────────────────────────────────
+def export_queue_csv() -> dict:
+    """Exporta todos los items de la cola (activos + completados) como CSV."""
+    try:
+        all_docs = _items_col().get()
+        items = [d.to_dict() for d in all_docs]
+        if not items:
+            return {"ok": False, "error": "Sin datos en la cola"}
+        FIELDS = [
+            "id", "viaje_n", "destino", "agencia", "tractora", "remolque",
+            "tipo_carga", "queue_type", "muelle", "playa", "hora_salida", "hora_acule",
+            "cam", "ruta", "pallets", "status", "urgente", "blocked",
+            "loader_id", "loader_name", "helper_loader_id",
+            "queued_at", "assigned_at", "load_start_at", "load_end_at",
+            "finished_at", "completed_at", "completed_muelle",
+            "numsup_count", "merch_threshold", "comment", "traffic_comment",
+            "source", "fecha", "cod_centro", "expedicion",
+        ]
+        lines = [";".join(FIELDS)]
+        for item in sorted(items, key=lambda x: x.get("queued_at") or ""):
+            lines.append(";".join(str(item.get(f, "")) for f in FIELDS))
+        return {
+            "ok": True,
+            "csv": "\n".join(lines),
+            "filename": f"pulso_cola_{_now_iso()[:10]}.csv",
+            "count": len(items),
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 def get_audit_log(limit: int = 100) -> dict:
     docs = (
         _audit_col()
@@ -422,7 +503,8 @@ def set_loader_muelle(loader_id: str, muelle: str) -> dict:
 
 # ── Asignación de siguiente ────────────────────────────────────────────────
 def assign_next(loader_id: str) -> dict:
-    """Asigna el siguiente item queued al cargador (transacción Firestore)."""
+    """Asigna el siguiente item queued al cargador.
+    Prioriza items con reserved_for == loader_id antes de la cola normal."""
     loader = get_loader(loader_id)
     if not loader:
         return {"ok": False, "error": "Cargador no encontrado"}
@@ -430,37 +512,48 @@ def assign_next(loader_id: str) -> dict:
         return {"ok": False, "error": "Cargador inactivo"}
 
     qt = loader.get("queue_type", "ambiente")
-    # Buscar items queued del tipo correcto, no bloqueados
-    candidates = (
+
+    # Prioridad 1: item reservado para este cargador
+    reserved = (
         _items_col()
-        .where(filter=firestore.FieldFilter("status", "==", "queued"))
-        .where(filter=firestore.FieldFilter("queue_type", "==", qt))
+        .where(filter=firestore.FieldFilter("reserved_for", "==", loader_id))
+        .limit(1)
         .get()
     )
-    eligible = [d for d in candidates if not d.to_dict().get("blocked")]
-    if not eligible:
-        return {"ok": False, "error": "No hay items en cola"}
+    if reserved:
+        best_doc = reserved[0]
+    else:
+        # Prioridad 2: cola normal del tipo correcto, no bloqueados
+        candidates = (
+            _items_col()
+            .where(filter=firestore.FieldFilter("status", "==", "queued"))
+            .where(filter=firestore.FieldFilter("queue_type", "==", qt))
+            .get()
+        )
+        eligible = [d for d in candidates if not d.to_dict().get("blocked")]
+        if not eligible:
+            return {"ok": False, "error": "No hay items en cola"}
 
-    # Ordenar: urgente primero, luego hora_salida
-    def sort_key(d):
-        it = d.to_dict()
-        return (0 if it.get("urgente") else 1, _parse_time(it.get("hora_salida", "")))
+        def sort_key(d):
+            it = d.to_dict()
+            return (0 if it.get("urgente") else 1, _parse_time(it.get("hora_salida", "")))
 
-    eligible.sort(key=sort_key)
-    best_doc = eligible[0]
+        eligible.sort(key=sort_key)
+        best_doc = eligible[0]
+
     item = best_doc.to_dict()
-
-    # Asignar
+    now_assign = _now_iso()
     item["status"] = "assigned"
     item["loader_id"] = loader_id
     item["loader_name"] = loader.get("name", loader_id)
-    item["assigned_at"] = _now_iso()
+    item["assigned_at"] = now_assign
 
     best_doc.reference.update({
         "status": "assigned",
         "loader_id": loader_id,
         "loader_name": loader.get("name", loader_id),
-        "assigned_at": item["assigned_at"],
+        "assigned_at": now_assign,
+        "reserved_for": None,
     })
     _audit("assign_next", item["id"], {"loader_id": loader_id})
     return {"ok": True, "item": item}
@@ -476,12 +569,17 @@ def finish_item(loader_id: str, item_id: str, checklist: dict = None, photos: li
         return {"ok": False, "error": "Item no pertenece al cargador"}
 
     now = _now_iso()
+    loader = get_loader(loader_id)
+    completed_muelle = loader.get("muelle_actual", "") if loader else ""
+
     updates = {
         "status": "done",
         "finished_at": now,
+        "completed_at": now,
+        "completed_muelle": completed_muelle,
         "checklist": checklist or {},
         "photos": photos or [],
     }
     _items_col().document(item_id).update(updates)
-    _audit("finish", item_id, {"loader_id": loader_id})
+    _audit("finish", item_id, {"loader_id": loader_id, "muelle": completed_muelle})
     return {"ok": True}
