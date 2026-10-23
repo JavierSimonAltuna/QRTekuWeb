@@ -84,6 +84,7 @@ ALLOWED_METHODS = {
     # Graph / SharePoint
     "graph_get_config", "graph_save_config", "graph_test",
     "graph_list_files", "graph_load_file", "graph_download_b64",
+    "reload_from_sharepoint",
 }
 
 
@@ -1033,7 +1034,132 @@ def _graph_load_file(server_url: str):
         )
         r.raise_for_status()
         b64 = base64.b64encode(r.content).decode()
-        return _load_excel_base64(filename, b64)
+        result = _load_excel_base64(filename, b64)
+        # Guardar graph_item_id para auto-reload desde SharePoint
+        if result.get("ok") and result.get("fecha_b2"):
+            try:
+                _cargas_doc(result["fecha_b2"]).update({"graph_item_id": server_url})
+            except Exception:
+                pass
+        return result
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def _reload_from_sharepoint(fecha=None):
+    """Re-descarga el Excel de SharePoint, detecta nuevas aculadas y las encola."""
+    cfg = _graph_reader_cfg()
+    if not (cfg.get("enabled") and cfg.get("client_secret")):
+        return {"ok": False, "error": "SharePoint no configurado"}
+
+    doc_ref = _cargas_doc(fecha)
+    doc = doc_ref.get()
+    if not doc.exists:
+        return {"ok": False, "error": "no_file"}
+    existing_data = doc.to_dict() or {}
+    graph_item_id = existing_data.get("graph_item_id")
+    if not graph_item_id:
+        return {"ok": False, "error": "no_sp_link"}
+
+    existing_rows = existing_data.get("rows", [])
+
+    try:
+        import requests as _req
+        token = _graph_token(cfg)
+        site = _graph_site_id(cfg, token)
+
+        meta = _req.get(
+            f"https://graph.microsoft.com/v1.0/sites/{site}/drive/items/{graph_item_id}",
+            headers={"Authorization": f"Bearer {token}"}, timeout=15,
+        )
+        meta.raise_for_status()
+        filename = meta.json().get("name", existing_data.get("filename", "plan_carga.xlsx"))
+
+        r = _req.get(
+            f"https://graph.microsoft.com/v1.0/sites/{site}/drive/items/{graph_item_id}/content",
+            headers={"Authorization": f"Bearer {token}"}, timeout=60, allow_redirects=True,
+        )
+        r.raise_for_status()
+
+        new_rows, fecha_b2 = _parse_excel_bytes(r.content, filename)
+        for row in new_rows:
+            row["fecha"] = fecha_b2
+            row["queue_type"] = _compute_queue_type(row)
+
+        # Preservar enriquecimiento y estado manual de las filas existentes
+        enrich_keys = {"numsup_count", "ruta_carga", "combined_count", "estado",
+                       "precintos_data", "cif", "agencia", "muelle", "playa", "matriculas"}
+        old_enrich = {}
+        for row in existing_rows:
+            n = str(row.get("n") or "")
+            if n:
+                old_enrich[n] = {k: row[k] for k in enrich_keys if k in row}
+
+        merged = []
+        for row in new_rows:
+            n = str(row.get("n") or "")
+            if n in old_enrich:
+                row = {**row, **old_enrich[n]}
+            merged.append(row)
+
+        # Detectar qué filas ya estaban aculadas (para no re-encolar)
+        old_aculadas = {
+            str(r.get("n") or r.get("destino") or "")
+            for r in existing_rows if r.get("aculado")
+        }
+
+        # Auto-encolar solo las NUEVAS aculadas
+        auto_count = 0
+        auto_error = None
+        try:
+            snap = Q.snapshot()
+            existing_ids = {
+                it.get("id", "") for lst in [
+                    snap.get("queued", []), snap.get("queued_refr", []),
+                    snap.get("queued_con", []), snap.get("assigned", []),
+                    snap.get("assigned_refr", []), snap.get("assigned_con", []),
+                    snap.get("pending_merch", []), snap.get("pending_merch_refr", []),
+                    snap.get("pending_merch_con", []),
+                ] for it in lst
+            }
+            for row in merged:
+                if not row.get("aculado") or row.get("ya_cargado"):
+                    continue
+                n_viaje = str(row.get("n") or "").strip()
+                destino = str(row.get("destino") or "").strip()
+                if not n_viaje and not destino:
+                    continue
+                key = n_viaje or destino
+                if key in existing_ids or key in old_aculadas:
+                    continue
+                try:
+                    Q.enqueue_manual(row, urgente=False)
+                    auto_count += 1
+                except Exception as e2:
+                    auto_error = str(e2)
+        except Exception as e:
+            auto_error = str(e)
+            print(f"[reload_sp] auto-enqueue error: {e}")
+
+        doc_ref.update({
+            "rows": merged,
+            "count": len(merged),
+            "sp_reloaded_at": _now_iso(),
+            "filename": filename,
+        })
+
+        result = {
+            "ok": True,
+            "rows": merged,
+            "count": len(merged),
+            "filename": filename,
+            "fecha": fecha_b2,
+            "new_aculadas": auto_count,
+        }
+        if auto_error:
+            result["auto_enqueue_error"] = auto_error
+        return result
+
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -1143,6 +1269,7 @@ HANDLERS = {
     "graph_list_files":         lambda *a, **k: _graph_list_files(),
     "graph_load_file":          lambda *a, **k: _graph_load_file(*a, **k),
     "graph_download_b64":       lambda *a, **k: _graph_download_b64(*a, **k),
+    "reload_from_sharepoint":   lambda *a, **k: _reload_from_sharepoint(*a, **k),
     "get_api_config":           lambda *a, **k: C.get_api_config(),
     "save_api_config":          lambda *a, **k: C.save_api_config(*a, **k),
     "test_api_connection":      lambda *a, **k: C.test_connection(),

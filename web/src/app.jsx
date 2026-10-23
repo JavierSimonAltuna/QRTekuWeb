@@ -275,12 +275,48 @@ const QRTekuApp = () => {
       if (res && res.ok && res.rows) {
         setRows(res.rows);
         setFileInfo({ name: res.filename, count: res.count, fecha: selectedFecha, path: res.filename });
-      } else {
-        setRows([]);
-        setFileInfo(null);
       }
+      // Si no existe plan para esta fecha, el polling lo resolverá o se quedará vacío
     }).catch(() => {});
   }, [selectedFecha]);
+
+  // ── SharePoint auto-reload (detectar nuevas aculaciones) ─────────────
+  useEffect(() => {
+    if (!fileInfo) return;
+    let alive = true;
+    const tick = async () => {
+      if (!alive || !fileInfo) return;
+      try {
+        const res = await window.api.call("reload_from_sharepoint", selectedFecha);
+        if (!alive) return;
+        if (res && res.ok) {
+          const newAcul = res.new_aculadas || 0;
+          if (newAcul > 0) {
+            notifyAcule(newAcul);
+            pushToast(`${newAcul} nueva(s) carga(s) aculada(s) añadidas a la cola`, "success");
+          }
+          setRows((prevRows) => {
+            const enrichMap = {};
+            prevRows.forEach((r) => {
+              const k = String(r.n ?? ""); if (!k) return;
+              const e = {};
+              if (r.numsup_count != null) e.numsup_count = r.numsup_count;
+              if (r.ruta_carga != null) e.ruta_carga = r.ruta_carga;
+              if (r.combined_count != null) e.combined_count = r.combined_count;
+              if (Object.keys(e).length) enrichMap[k] = e;
+            });
+            return res.rows.map((r) => {
+              const e = enrichMap[String(r.n ?? "")] || {};
+              return Object.keys(e).length ? { ...r, ...e } : r;
+            });
+          });
+        }
+      } catch (_) {}
+      if (alive) setTimeout(tick, 120000);
+    };
+    const t = setTimeout(tick, 30000);
+    return () => { alive = false; clearTimeout(t); };
+  }, [fileInfo, selectedFecha]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Estado Graph / SharePoint ─────────────────────────────────────────
   useEffect(() => {
