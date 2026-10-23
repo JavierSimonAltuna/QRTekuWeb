@@ -167,9 +167,15 @@ def snapshot() -> dict:
 def enqueue_manual(row: dict, urgente: bool = False) -> dict:
     counter = _next_counter()
     now = _now_iso()
-    qt = row.get("queue_type", "ambiente")
+    qt = row.get("queue_type") or row.get("tipo_viaje") or "ambiente"
     if qt not in ("ambiente", "refrigerado", "congelado"):
         qt = "ambiente"
+
+    # Extraer tractora/remolque de matriculas si no vienen ya separados
+    _matriculas = str(row.get("matriculas") or "")
+    _partes = [p.strip() for p in _matriculas.split("/")]
+    tractora = str(row.get("tractora") or _partes[0] if _partes else "")
+    remolque  = str(row.get("remolque") or (_partes[1] if len(_partes) > 1 else ""))
 
     item_id = f"M-{counter:04d}-{now[:10]}"
     item = {
@@ -193,6 +199,8 @@ def enqueue_manual(row: dict, urgente: bool = False) -> dict:
         "playa": str(row.get("playa") or ""),
         "hora_salida": str(row.get("hora_salida") or ""),
         "cam": str(row.get("cam") or ""),
+        "tractora": tractora,
+        "remolque": remolque,
         "destino": str(row.get("destino") or ""),
         "codcli": str(row.get("codcli") or ""),
         "agencia": str(row.get("agencia") or ""),

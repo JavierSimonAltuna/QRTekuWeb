@@ -542,7 +542,18 @@ const QRTekuApp = () => {
   const loadAvailableDates = useCallback(async () => {
     try {
       const r = await window.api.call("list_cargas_dates");
-      if (r && r.ok) setAvailableDates(r.dates || []);
+      if (r && r.ok) {
+        const dates = r.dates || [];
+        setAvailableDates(dates);
+        // Si hoy no tiene plan, cargar automáticamente el más reciente
+        if (dates.length > 0) {
+          setSelectedFecha(prev => {
+            if (prev !== todayYMD()) return prev;
+            const hasToday = dates.some(d => d.fecha === prev);
+            return hasToday ? prev : dates[0].fecha;
+          });
+        }
+      }
     } catch (_) {}
   }, []);
 
