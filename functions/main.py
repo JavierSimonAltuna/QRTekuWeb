@@ -67,8 +67,9 @@ ALLOWED_METHODS = {
     "export_cargas_csv",
     # Cargadores (gestión)
     "loader_upsert", "loader_remove",
-    # Info
+    # Info / diagnóstico
     "app_info", "get_odbc_diagnostics", "get_debug_log", "get_audit_log",
+    "queue_debug",
     # Config API
     "get_api_config", "save_api_config", "test_api_connection",
     # Excel sessions
@@ -89,6 +90,23 @@ def _queue_snapshot():
     total = sum(len(result.get(k, [])) for k in ("queued","queued_refr","queued_con","assigned","assigned_refr","assigned_con","pending_merch","pending_merch_refr","pending_merch_con","done"))
     print(f"[pulso] queue_snapshot: {total} items total, counts={result.get('counts',{})}")
     return result
+
+def _queue_debug():
+    """Diagnóstico: cuenta docs en queue_items sin filtro + meta/counter."""
+    try:
+        all_docs = Q._items_col().limit(200).get()
+        items_raw = [d.to_dict() for d in all_docs]
+        counter_doc = Q._meta_doc("counter").get()
+        counter_val = counter_doc.get("value") if counter_doc.exists else None
+        return {
+            "ok": True,
+            "total_items": len(items_raw),
+            "counter": counter_val,
+            "statuses": {s: sum(1 for i in items_raw if i.get("status") == s) for s in set(i.get("status","?") for i in items_raw)},
+            "sample": items_raw[:3],
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e), "traceback": traceback.format_exc()}
 
 def _queue_enqueue_manual(row: dict, urgente: bool = False):
     return Q.enqueue_manual(row, urgente)
@@ -971,6 +989,7 @@ def _get_audit_log(limit: int = 100):
 
 HANDLERS = {
     "queue_snapshot":           lambda *a, **k: _queue_snapshot(),
+    "queue_debug":              lambda *a, **k: _queue_debug(),
     "queue_enqueue_manual":     lambda *a, **k: _queue_enqueue_manual(*a, **k),
     "queue_remove":             lambda *a, **k: _queue_remove(*a, **k),
     "queue_reassign":           lambda *a, **k: _queue_reassign(*a, **k),

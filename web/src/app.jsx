@@ -365,13 +365,21 @@ const QRTekuApp = () => {
       }
 
       // Actualizar pales + ruta para cualquier camión (aculado o no)
+      // Propagar también a otras filas con el mismo cod_centro (misma ruta)
       if (countRes.ok) {
         const patch = {};
         if (countRes.numsup_count > 0) patch.numsup_count = countRes.numsup_count;
         if (countRes.combined_count > 0) patch.combined_count = countRes.combined_count;
         if (countRes.ruta_carga != null) patch.ruta_carga = countRes.ruta_carga;
         if (Object.keys(patch).length > 0) {
-          setRows((rs) => rs.map((r) => (r.n === row.n ? { ...r, ...patch } : r)));
+          const sameCodCentro = row.cod_centro;
+          setRows((rs) => rs.map((r) => {
+            if (r.n === row.n) return { ...r, ...patch };
+            // Propagar ruta/pales a filas del mismo centro si aún no tienen datos
+            if (sameCodCentro && r.cod_centro === sameCodCentro && r.numsup_count == null && r.ruta_carga == null)
+              return { ...r, ...patch };
+            return r;
+          }));
           window.api.call("update_row", row.n, patch).catch(() => {});
         }
       }

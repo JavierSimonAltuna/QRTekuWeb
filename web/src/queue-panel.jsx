@@ -55,7 +55,15 @@ const QueuePanel = ({ pushToast }) => {
     try {
       const r = await window.api.call("queue_snapshot");
       if (r.counts) setSnap(r);
-    } catch (e) { /* silencio */ }
+      else console.warn("[cola] queue_snapshot sin counts:", r);
+    } catch (e) { console.error("[cola] queue_snapshot error:", e); }
+  }, []);
+
+  const handleQueueDebug = useCallback(async () => {
+    try {
+      const r = await window.api.call("queue_debug");
+      alert(`queue_debug:\n${JSON.stringify(r, null, 2)}`);
+    } catch (e) { alert(`Error: ${e.message}`); }
   }, []);
 
   useEffect(() => {
@@ -295,6 +303,9 @@ const QueuePanel = ({ pushToast }) => {
         </button>
         <button onClick={handleOpenDebugLog} style={{ ...QS.odbcBtn, background: "#1c1917", color: "#fafaf9" }} title="Log de ejecución">
           Logs
+        </button>
+        <button onClick={handleQueueDebug} style={{ ...QS.odbcBtn, background: "#dc2626", color: "#fff" }} title="Diagnóstico cola Firestore">
+          Debug
         </button>
         {window.pywebview ? (
           <button
