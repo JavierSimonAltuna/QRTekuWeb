@@ -71,7 +71,7 @@ ALLOWED_METHODS = {
     "queue_reset_done", "queue_reset_queued", "queue_update_ruta",
     "queue_block", "queue_unblock", "queue_assign_helper", "queue_remove_helper",
     "queue_set_load_start", "queue_set_load_end", "queue_change_queue_type",
-    "export_cargas_csv", "export_queue_csv",
+    "export_cargas_csv", "export_queue_csv", "queue_fix_legacy",
     # Cargadores (gestión)
     "loader_upsert", "loader_remove",
     # Info / diagnóstico
@@ -1283,6 +1283,7 @@ HANDLERS = {
     "count_gesupej_bulk":       lambda *a, **k: _count_gesupej_bulk(*a, **k),
     "export_cargas_csv":        lambda *a, **k: _export_cargas_csv(*a, **k),
     "export_queue_csv":         lambda *a, **k: _export_queue_csv(),
+    "queue_fix_legacy":         lambda *a, **k: Q.fix_legacy_tipo_carga(),
     "app_info":                 lambda *a, **k: _app_info(),
     "get_odbc_diagnostics":     lambda *a, **k: _get_odbc_diagnostics(),
     "get_debug_log":            lambda *a, **k: _get_debug_log(*a, **k),

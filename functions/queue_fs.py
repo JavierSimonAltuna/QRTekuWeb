@@ -411,6 +411,24 @@ def reset_queued(queue_type: str = None) -> dict:
 
 
 # ── Audit log ─────────────────────────────────────────────────────────────
+def fix_legacy_tipo_carga() -> dict:
+    """Migración puntual: corrige tipo_carga en items que lo tienen ausente o incorrecto."""
+    tipo_map = {"ambiente": "AMBIENTE", "refrigerado": "REFRIGERADO", "congelado": "CONGELADO"}
+    docs = _items_col().get()
+    fixed = 0
+    batch = db().batch()
+    for doc in docs:
+        item = doc.to_dict()
+        qt = item.get("queue_type", "ambiente")
+        expected_tc = tipo_map.get(qt, "AMBIENTE")
+        if item.get("tipo_carga") != expected_tc:
+            batch.update(doc.reference, {"tipo_carga": expected_tc})
+            fixed += 1
+    if fixed:
+        batch.commit()
+    return {"ok": True, "fixed": fixed}
+
+
 def export_queue_csv() -> dict:
     """Exporta todos los items de la cola (activos + completados) como CSV."""
     try:
