@@ -455,16 +455,30 @@ const QRTekuApp = () => {
     try {
       const res = await window.api.call("count_gesupej_bulk", entries);
       if (!res.ok || !res.results) return;
-      setRows((rs) => rs.map((r) => {
-        if (!r.cod_centro) return r;
+
+      // Construir patch por fila (keyed por r.n)
+      const rowPatches = {};
+      rowsToEnrich.forEach((r) => {
+        if (!r.cod_centro || r.n == null) return;
         const data = res.results[r.cod_centro];
-        if (!data || !data.ok) return r;
+        if (!data || !data.ok) return;
         const patch = {};
         if (data.numsup_count > 0) patch.numsup_count = data.numsup_count;
         if (data.combined_count > 0) patch.combined_count = data.combined_count;
         if (data.ruta_carga != null) patch.ruta_carga = data.ruta_carga;
-        return Object.keys(patch).length ? { ...r, ...patch } : r;
+        if (Object.keys(patch).length) rowPatches[r.n] = patch;
+      });
+
+      // Actualizar estado React
+      setRows((rs) => rs.map((r) => {
+        const patch = r.n != null ? rowPatches[r.n] : null;
+        return patch ? { ...r, ...patch } : r;
       }));
+
+      // Persistir en Firestore para que el polling los vea (1 write para todas las filas)
+      if (Object.keys(rowPatches).length) {
+        window.api.call("bulk_update_rows", rowPatches).catch(() => {});
+      }
     } catch (_) {}
   }, []);
 

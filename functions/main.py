@@ -56,7 +56,7 @@ ALLOWED_METHODS = {
     "loader_refresh_precintos", "loader_finish", "loader_set_muelle",
     # Cargas (supervisor)
     "load_excel_base64", "reload_excel", "clear_excel", "lookup_chf", "count_gesupej",
-    "get_cargas_state", "update_row", "count_gesupej_bulk",
+    "get_cargas_state", "update_row", "bulk_update_rows", "count_gesupej_bulk",
     # Cola
     "queue_snapshot", "queue_enqueue_manual", "queue_remove", "queue_reassign",
     "queue_set_urgent", "queue_set_comment", "queue_set_traffic_comment",
@@ -660,6 +660,35 @@ def _update_row(n: str, patch: dict):
     return {"ok": False, "error": "row_not_found"}
 
 
+def _bulk_update_rows(updates: dict):
+    """Actualiza múltiples filas en una sola lectura/escritura de Firestore.
+    updates: {"n": {"numsup_count": x, "ruta_carga": y, ...}}
+    """
+    if not updates:
+        return {"ok": True, "updated": 0}
+    allowed = {"cif", "agencia", "estado", "precintos_data", "muelle", "playa", "matriculas", "numsup_count", "ruta_carga", "combined_count"}
+    doc_ref = _cargas_doc()
+    doc = doc_ref.get()
+    if not doc.exists:
+        return {"ok": False, "error": "no_file"}
+    data = doc.to_dict() or {}
+    rows = data.get("rows", [])
+    n_to_idx = {str(r.get("n", "")): i for i, r in enumerate(rows)}
+    updated = 0
+    for n_key, patch in (updates or {}).items():
+        clean = {k: v for k, v in (patch or {}).items() if k in allowed}
+        if not clean:
+            continue
+        idx = n_to_idx.get(str(n_key))
+        if idx is None:
+            continue
+        rows[idx] = {**rows[idx], **clean}
+        updated += 1
+    if updated:
+        doc_ref.update({"rows": rows})
+    return {"ok": True, "updated": updated}
+
+
 def _get_excel_sessions():
     docs = (
         _cargas_sessions_col()
@@ -1058,6 +1087,7 @@ HANDLERS = {
     "clear_excel":              lambda *a, **k: _clear_excel(),
     "get_cargas_state":         lambda *a, **k: _get_cargas_state(),
     "update_row":               lambda *a, **k: _update_row(*a, **k),
+    "bulk_update_rows":         lambda *a, **k: _bulk_update_rows(*a, **k),
     "get_excel_sessions":       lambda *a, **k: _get_excel_sessions(),
     "switch_excel_session":     lambda *a, **k: _switch_excel_session(*a, **k),
     "lookup_chf":               lambda *a, **k: _lookup_chf(*a, **k),
