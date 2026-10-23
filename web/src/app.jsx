@@ -447,6 +447,27 @@ const QRTekuApp = () => {
     } catch (_) {}
   }, []);
 
+  const loadPalesBulk = useCallback(async (rowsToEnrich) => {
+    const entries = rowsToEnrich
+      .filter((r) => r.cod_centro)
+      .map((r) => ({ cod_centro: r.cod_centro, tipo_viaje: r.tipo_viaje || "ambiente", col_w: r.col_w || "" }));
+    if (!entries.length) return;
+    try {
+      const res = await window.api.call("count_gesupej_bulk", entries);
+      if (!res.ok || !res.results) return;
+      setRows((rs) => rs.map((r) => {
+        if (!r.cod_centro) return r;
+        const data = res.results[r.cod_centro];
+        if (!data || !data.ok) return r;
+        const patch = {};
+        if (data.numsup_count > 0) patch.numsup_count = data.numsup_count;
+        if (data.combined_count > 0) patch.combined_count = data.combined_count;
+        if (data.ruta_carga != null) patch.ruta_carga = data.ruta_carga;
+        return Object.keys(patch).length ? { ...r, ...patch } : r;
+      }));
+    } catch (_) {}
+  }, []);
+
   const applyExcelResult = useCallback((res, path) => {
     setRows(res.rows);
     setFileInfo({ name: res.filename, count: res.count, fecha: res.fecha_b2, path: path || res.filename });
@@ -458,7 +479,9 @@ const QRTekuApp = () => {
     if (res.auto_enqueue_error) {
       pushToast(`Error al encolar: ${res.auto_enqueue_error}`, "error");
     }
-  }, [pushToast]);
+    // Cargar pales de todos los centros en segundo plano
+    loadPalesBulk(res.rows || []);
+  }, [pushToast, loadPalesBulk]);
 
   const handleImport = async () => {
     if (apiReady()) {

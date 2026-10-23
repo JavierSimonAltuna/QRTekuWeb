@@ -56,7 +56,7 @@ ALLOWED_METHODS = {
     "loader_refresh_precintos", "loader_finish", "loader_set_muelle",
     # Cargas (supervisor)
     "load_excel_base64", "reload_excel", "clear_excel", "lookup_chf", "count_gesupej",
-    "get_cargas_state", "update_row",
+    "get_cargas_state", "update_row", "count_gesupej_bulk",
     # Cola
     "queue_snapshot", "queue_enqueue_manual", "queue_remove", "queue_reassign",
     "queue_set_urgent", "queue_set_comment", "queue_set_traffic_comment",
@@ -753,6 +753,42 @@ def _count_gesupej(cod_centro: str, tipo_viaje: str = "ambiente", col_w: str = "
     }
 
 
+# ── Pales bulk (todos los centros en paralelo) ────────────────────────────
+def _count_gesupej_bulk(entries: list) -> dict:
+    """
+    entries: [{cod_centro, tipo_viaje, col_w}, ...]
+    Devuelve {results: {cod_centro: {numsup_count, ruta_carga, combined_count}}}
+    Deduplica por cod_centro y hace las llamadas en paralelo.
+    """
+    import concurrent.futures
+
+    # Deduplicar: guardar primer entry de cada cod_centro
+    seen: dict[str, dict] = {}
+    for e in (entries or []):
+        cc = str(e.get("cod_centro") or "").strip()
+        if cc and cc not in seen:
+            seen[cc] = e
+
+    def _fetch(entry):
+        cc = str(entry.get("cod_centro") or "").strip()
+        res = _count_gesupej(cc, entry.get("tipo_viaje", "ambiente"), entry.get("col_w", ""))
+        return cc, res
+
+    results = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        futures = {ex.submit(_fetch, e): e for e in seen.values()}
+        for fut in concurrent.futures.as_completed(futures):
+            try:
+                cc, res = fut.result(timeout=15)
+                results[cc] = res
+            except Exception as exc:
+                entry = futures[fut]
+                cc = str(entry.get("cod_centro") or "").strip()
+                results[cc] = {"ok": False, "error": str(exc)}
+
+    return {"ok": True, "results": results}
+
+
 # ── CSV export ────────────────────────────────────────────────────────────
 def _export_cargas_csv():
     doc = _cargas_doc().get()
@@ -1026,6 +1062,7 @@ HANDLERS = {
     "switch_excel_session":     lambda *a, **k: _switch_excel_session(*a, **k),
     "lookup_chf":               lambda *a, **k: _lookup_chf(*a, **k),
     "count_gesupej":            lambda *a, **k: _count_gesupej(*a, **k),
+    "count_gesupej_bulk":       lambda *a, **k: _count_gesupej_bulk(*a, **k),
     "export_cargas_csv":        lambda *a, **k: _export_cargas_csv(),
     "app_info":                 lambda *a, **k: _app_info(),
     "get_odbc_diagnostics":     lambda *a, **k: _get_odbc_diagnostics(),
