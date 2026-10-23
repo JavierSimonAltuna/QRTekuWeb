@@ -545,12 +545,11 @@ const QRTekuApp = () => {
       if (r && r.ok) {
         const dates = r.dates || [];
         setAvailableDates(dates);
-        // Si hoy no tiene plan, cargar automáticamente el más reciente
         if (dates.length > 0) {
           setSelectedFecha(prev => {
-            if (prev !== todayYMD()) return prev;
-            const hasToday = dates.some(d => d.fecha === prev);
-            return hasToday ? prev : dates[0].fecha;
+            const stillExists = dates.some(d => d.fecha === prev);
+            if (stillExists) return prev;
+            return dates[0].fecha;
           });
         }
       }
@@ -636,6 +635,7 @@ const QRTekuApp = () => {
       setSelectedIdx(null);
       setEditing({});
       setExcelSessions([]);
+      setSelectedFecha(todayYMD());
       loadAvailableDates();
       pushToast("Plan de carga limpiado", "success");
     } else {
@@ -887,6 +887,18 @@ const QRTekuApp = () => {
                   {fecToDisplay(d.fecha)}
                 </button>
               ))}
+              <input
+                type="date"
+                value={selectedFecha ? `${selectedFecha.slice(0,4)}-${selectedFecha.slice(4,6)}-${selectedFecha.slice(6,8)}` : ""}
+                onChange={(e) => { const v = e.target.value; if (v) setSelectedFecha(v.replace(/-/g, "")); }}
+                style={{
+                  marginLeft: "auto", padding: "2px 6px", borderRadius: 6,
+                  border: "1px solid var(--border, #e7e5e4)", fontSize: 11,
+                  background: "var(--bg, #fff)", color: "var(--fg, #292524)",
+                  fontFamily: "inherit", cursor: "pointer",
+                }}
+                title="Ir a fecha"
+              />
             </div>
           )}
           {/* Stats strip */}

@@ -62,7 +62,7 @@ ALLOWED_METHODS = {
     "loader_login", "loader_current", "loader_request_next",
     "loader_refresh_precintos", "loader_finish", "loader_set_muelle",
     # Cargas (supervisor)
-    "load_excel_base64", "reload_excel", "clear_excel", "lookup_chf", "count_gesupej",
+    "load_excel_base64", "reload_excel", "clear_excel", "lookup_chf", "lookup_client", "count_gesupej",
     "get_cargas_state", "update_row", "bulk_update_rows", "list_cargas_dates", "count_gesupej_bulk",
     # Cola
     "queue_snapshot", "queue_enqueue_manual", "queue_remove", "queue_reassign",
@@ -91,6 +91,40 @@ ALLOWED_METHODS = {
 # ══════════════════════════════════════════════════════════════════════════
 # IMPLEMENTACIONES
 # ══════════════════════════════════════════════════════════════════════════
+
+# ── Constantes de clasificación (espejo de qr_teku_core.py) ──────────────
+_GALLEGOS = frozenset({
+    "00000610", "00000770", "00000834", "00000626", "00000334",
+    "00000665", "00000972", "00000054", "00000811", "00000426", "00006270",
+})
+_ADELANTADOS_MANANA = frozenset({"00000034", "00004382"})
+_ADELANTADOS_TARDE  = frozenset({"00000035", "00000079", "00000642", "00004333", "00000046"})
+_CATCLI_HIPER   = frozenset({"110", "120", "130", "160", "185", "190"})
+_CATCLI_MARKET  = frozenset({"220", "250", "323"})
+_CATCLI_EXPRESS = frozenset({"470", "480", "484"})
+
+
+def _get_categoria_tipo(catcli: str) -> str:
+    c = str(catcli or "").strip()
+    if c in _CATCLI_HIPER:   return "hiper"
+    if c in _CATCLI_MARKET:  return "market"
+    if c in _CATCLI_EXPRESS: return "express"
+    return "otro"
+
+
+def _get_min_pales(catcli: str) -> "int | None":
+    cat = _get_categoria_tipo(catcli)
+    if cat == "hiper":   return 35
+    if cat == "market":  return 12
+    return None
+
+
+def _to_codcli_key(cod_centro: str) -> str:
+    try:
+        return str(int(float(str(cod_centro or "").strip()))).zfill(8)
+    except Exception:
+        return ""
+
 
 # ── Cola ──────────────────────────────────────────────────────────────────
 def _queue_snapshot():
@@ -683,7 +717,8 @@ def _get_cargas_state(fecha=None):
 
 def _update_row(n: str, patch: dict, fecha=None):
     allowed = {"cif", "agencia", "estado", "precintos_data", "muelle", "playa", "matriculas",
-               "numsup_count", "ruta_carga", "combined_count", "hora_acule", "aculado", "ya_cargado"}
+               "numsup_count", "ruta_carga", "combined_count", "hora_acule", "aculado", "ya_cargado",
+               "catcli", "categoria_tipo", "min_pales", "es_gallego", "gallego_urgente", "adelantado_tipo"}
     patch = {k: v for k, v in (patch or {}).items() if k in allowed}
     if not patch:
         return {"ok": True}
@@ -709,7 +744,8 @@ def _bulk_update_rows(updates: dict, fecha=None):
     if not updates:
         return {"ok": True, "updated": 0}
     allowed = {"cif", "agencia", "estado", "precintos_data", "muelle", "playa", "matriculas",
-               "numsup_count", "ruta_carga", "combined_count", "hora_acule", "aculado", "ya_cargado"}
+               "numsup_count", "ruta_carga", "combined_count", "hora_acule", "aculado", "ya_cargado",
+               "catcli", "categoria_tipo", "min_pales", "es_gallego", "gallego_urgente", "adelantado_tipo"}
     doc_ref = _cargas_doc(fecha)
     doc = doc_ref.get()
     if not doc.exists:
@@ -796,12 +832,23 @@ def _lookup_chf(matricula: str):
     return {"ok": True, "found": False, "error": "No encontrado", "debug_norm": tractora_norm, "debug_api_url": api_url}
 
 
-def _count_gesupej(cod_centro: str, tipo_viaje: str = "ambiente", col_w: str = ""):
+def _lookup_client(cod_cli: str):
+    s = str(cod_cli or "").strip()
+    try:
+        codcli = str(int(float(s))).zfill(8) if s else ""
+    except Exception:
+        codcli = s
+    if not codcli:
+        return {"ok": False, "error": "cod_cli vacío"}
+    data = C.lookup_client(codcli)
+    if data:
+        return {"ok": True, "found": True, **data}
+    return {"ok": True, "found": False}
+
+
+def _count_gesupej(cod_centro: str, tipo_viaje: str = "ambiente", col_w: str = "", hora_acule: str = "", col_i: str = ""):
     """
-    Devuelve pales + ruta_carga para un cod_centro, igual que el desktop:
-      - numsup_count: GESUPEJ por codcli
-      - ruta_carga:   touliv1 ± 5 (o +1 para adelantados)
-      - combined_count: numsup + gesupe6 por ruta
+    Devuelve pales + ruta_carga + CIF + clasificación para un cod_centro.
     """
     try:
         s = str(cod_centro or "").strip()
@@ -809,33 +856,73 @@ def _count_gesupej(cod_centro: str, tipo_viaje: str = "ambiente", col_w: str = "
     except (ValueError, TypeError):
         codcli = str(cod_centro or "").strip()
     if not codcli:
-        return {"ok": True, "numsup_count": 0, "ruta_carga": None, "combined_count": None}
+        return {"ok": True, "numsup_count": 0, "ruta_carga": None, "combined_count": None,
+                "cif": None, "catcli": None, "categoria_tipo": None, "min_pales": None,
+                "es_gallego": False, "gallego_urgente": False, "adelantado_tipo": None}
 
     ambiente = str(tipo_viaje or "").lower() == "ambiente"
     codact = "101" if ambiente else "003"
     ambi_str = "true" if ambiente else "false"
     is_adelantado = str(col_w or "").strip().upper() == "A"
+    norm_key = _to_codcli_key(codcli)
 
     numsup = C.count_gesupej(codcli, ambi_str)
 
-    # Obtener ruta_carga a partir de touliv1 (igual que desktop)
+    # CIF desde GECLI2
+    cif_data = C.lookup_client(codcli)
+    cif = cif_data.get("cif") if cif_data else None
+
     ruta_carga = None
     combined_count = numsup
+    catcli = None
     try:
-        touliv1_raw = C.lookup_touliv1(codcli, codact)
-        if touliv1_raw:
-            touliv1 = int(float(touliv1_raw))
-            ruta_carga = touliv1 + 1 if is_adelantado else touliv1 - 5
-            gesupe6 = C.count_gesupe6(str(ruta_carga))
-            combined_count = numsup + gesupe6
+        raw = C._get("/api/pulso/gecli2/touliv1", {"codcli": codcli, "codact": codact})
+        if raw and raw.get("ok") and raw.get("found"):
+            v = raw.get("touliv1")
+            if v is not None:
+                touliv1 = int(float(v))
+                ruta_carga = touliv1 + 1 if is_adelantado else touliv1 - 5
+                gesupe6 = C.count_gesupe6(str(ruta_carga))
+                combined_count = numsup + gesupe6
+            catcli = str(raw.get("catcli") or "").strip() or None
     except Exception:
         pass
+
+    # Clasificación
+    categoria_tipo = _get_categoria_tipo(catcli) if catcli else None
+    min_pales = _get_min_pales(catcli) if catcli else None
+
+    # Gallego / adelantado
+    es_gallego = norm_key in _GALLEGOS
+    gallego_urgente = False
+    if es_gallego:
+        try:
+            h_str = str(hora_acule or "").strip().split(":")[0]
+            gallego_urgente = int(h_str) < 12
+        except Exception:
+            pass
+
+    adelantado_tipo = None
+    if is_adelantado:
+        if norm_key in _ADELANTADOS_MANANA or "DEP" in str(col_i or "").upper():
+            adelantado_tipo = "manana"
+        elif norm_key in _ADELANTADOS_TARDE:
+            adelantado_tipo = "tarde"
+        else:
+            adelantado_tipo = "A"
 
     return {
         "ok": True,
         "numsup_count": numsup,
         "ruta_carga": ruta_carga,
         "combined_count": combined_count,
+        "cif": cif,
+        "catcli": catcli,
+        "categoria_tipo": categoria_tipo,
+        "min_pales": min_pales,
+        "es_gallego": es_gallego,
+        "gallego_urgente": gallego_urgente,
+        "adelantado_tipo": adelantado_tipo,
     }
 
 
@@ -857,7 +944,13 @@ def _count_gesupej_bulk(entries: list) -> dict:
 
     def _fetch(entry):
         cc = str(entry.get("cod_centro") or "").strip()
-        res = _count_gesupej(cc, entry.get("tipo_viaje", "ambiente"), entry.get("col_w", ""))
+        res = _count_gesupej(
+            cc,
+            entry.get("tipo_viaje", "ambiente"),
+            entry.get("col_w", ""),
+            entry.get("hora_acule", ""),
+            entry.get("col_i", ""),
+        )
         return cc, res
 
     results = {}
@@ -1279,6 +1372,7 @@ HANDLERS = {
     "get_excel_sessions":       lambda *a, **k: _get_excel_sessions(),
     "switch_excel_session":     lambda *a, **k: _switch_excel_session(*a, **k),
     "lookup_chf":               lambda *a, **k: _lookup_chf(*a, **k),
+    "lookup_client":            lambda *a, **k: _lookup_client(*a, **k),
     "count_gesupej":            lambda *a, **k: _count_gesupej(*a, **k),
     "count_gesupej_bulk":       lambda *a, **k: _count_gesupej_bulk(*a, **k),
     "export_cargas_csv":        lambda *a, **k: _export_cargas_csv(*a, **k),
