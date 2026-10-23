@@ -180,7 +180,11 @@ def enqueue_manual(row: dict, urgente: bool = False) -> dict:
     # mercancia_ok: si numsup_count se conoce en el momento del encolado, calcular
     numsup_count = row.get("numsup_count")
     merch_threshold = int(row.get("merch_threshold") or 25)
-    if numsup_count is not None:
+    # Para viajes combinados, usar mercancia_ok del plan si viene calculado
+    if row.get("mercancia_ok") is not None:
+        mercancia_ok = bool(row.get("mercancia_ok"))
+        initial_status = "queued" if mercancia_ok else "pending_merch"
+    elif numsup_count is not None:
         mercancia_ok = int(numsup_count) >= merch_threshold
         initial_status = "queued" if mercancia_ok else "pending_merch"
     else:
@@ -229,6 +233,11 @@ def enqueue_manual(row: dict, urgente: bool = False) -> dict:
         "numsup_count": numsup_count,
         "merch_threshold": merch_threshold,
         "precintos_data": row.get("precintos_data") or [],
+        # Viajes combinados
+        "is_combined": bool(row.get("is_combined", False)),
+        "trip_destinos": row.get("trip_destinos") or [],
+        "trip_centers": row.get("trip_centers") or [],
+        "combined_count": row.get("combined_count"),
     }
     _items_col().document(item_id).set(item)
     _audit("enqueue_manual", item_id, {"urgente": urgente, "status": initial_status})

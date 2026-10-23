@@ -603,6 +603,36 @@ def _load_excel_base64(filename: str, b64_content: str):
             r["fecha"] = fecha_b2
             r["queue_type"] = _compute_queue_type(r)
 
+        # ── Agrupación de viajes combinados (misma lógica que desktop api.py:316) ──
+        _viaje_counts: dict = {}
+        _viaje_rows: dict = {}
+        for r in rows:
+            if r.get("aculado") and not r.get("ya_cargado"):
+                _n = r.get("n", "")
+                if _n:
+                    _viaje_counts[_n] = _viaje_counts.get(_n, 0) + int(r.get("numsup_count") or 0)
+                    if _n not in _viaje_rows:
+                        _viaje_rows[_n] = []
+                    _viaje_rows[_n].append(r)
+        for _n, _group in _viaje_rows.items():
+            _combined = _viaje_counts[_n]
+            _min_vals = [g.get("min_pales") for g in _group if g.get("min_pales") is not None]
+            _threshold = max(_min_vals) if _min_vals else 25
+            _is_combined = len(_group) > 1
+            _trip_destinos = [g.get("destino", "") for g in _group]
+            _trip_centers = [
+                {"destino": g.get("destino", ""), "numsup_count": g.get("numsup_count", 0),
+                 "ruta_carga": g.get("ruta_carga"), "cod_centro": g.get("cod_centro", "")}
+                for g in _group
+            ]
+            for g in _group:
+                g["combined_count"] = _combined
+                g["mercancia_ok"] = _combined >= _threshold
+                g["is_combined"] = _is_combined
+                g["trip_destinos"] = _trip_destinos
+                g["trip_centers"] = _trip_centers
+                g["merch_threshold"] = _threshold
+
         session_id = f"session-{_now_iso()[:19].replace(':','-').replace('T','_')}"
         now = _now_iso()
         fs_error = None
