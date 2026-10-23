@@ -1149,10 +1149,15 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onR
     reader.readAsDataURL(file);
     e.target.value = "";
   };
+  const typeBorderColor = item.urgente ? "#dc2626"
+    : item.blocked ? "#f59e0b"
+    : item.queue_type === "congelado" ? "#7c3aed"
+    : item.queue_type === "refrigerado" ? "#0ea5e9"
+    : "#f97316";
   return (
   <div style={{
     ...QS.card,
-    borderLeft: item.urgente ? "3px solid #dc2626" : item.blocked ? "3px solid #f59e0b" : "3px solid transparent",
+    borderLeft: `3px solid ${typeBorderColor}`,
     opacity: item.blocked ? 0.75 : 1,
   }}>
     <div style={QS.cardHead}>
@@ -1250,29 +1255,25 @@ const QueueCard = ({ item, position, loaders, onToggleUrgent, onToggleBlock, onR
         </div>
       )}
       <div style={QS.cardMeta}>
-        {item.source === "manual" ? (
-          <>
-            {item.ruta && <Meta label="Ruta" value={item.ruta} />}
-            {item.pallets && <Meta label="Pallets" value={item.pallets} />}
-            {item.muelle && <Meta label="Muelle" value={(item.muelle || "—").padStart(2, "0")} />}
-          </>
-        ) : (
-          <>
-            <Meta label="Muelle" value={(item.muelle || "—").padStart(2, "0")} />
-            <Meta label="Playa" value={item.playa || "—"} />
-            <Meta label="Salida" value={item.hora_salida || "—"} />
-            <Meta label="Camión" value={(item.cam || "—").toString()} />
-          </>
-        )}
+        {item.viaje_n && <Meta label="Nº" value={item.viaje_n} />}
+        {item.muelle && <Meta label="Muelle" value={item.muelle.toString().padStart(2, "0")} />}
+        {item.playa && <Meta label="Playa" value={item.playa} />}
+        {item.hora_salida && <Meta label="Salida" value={item.hora_salida} />}
+        {item.cam && <Meta label="Camión" value={item.cam.toString()} />}
+        {item.ruta && <Meta label="Ruta" value={item.ruta} />}
+        {item.pallets && <Meta label="Pallets" value={item.pallets} />}
         {item.cod_centro && <Meta label="Cliente" value={item.cod_centro} />}
-        {item.numsup_count != null && (
-          <Meta label="Soportes" value={`${item.numsup_count} / ${item.merch_threshold ?? 25}`} />
-        )}
-        {item.combined_count != null && item.numsup_count == null && (
-          <Meta label="Pales" value={`${item.combined_count} / ${item.merch_threshold ?? 25}`} />
+        {(item.numsup_count != null || item.combined_count != null) && (
+          <Meta
+            label="Pales"
+            value={`${item.combined_count ?? item.numsup_count} / ${item.merch_threshold ?? 25}`}
+          />
         )}
       </div>
-      <div style={QS.cardTractora}>{item.tractora}</div>
+      <div style={QS.cardTractora}>
+        {item.tractora || ""}
+        {item.remolque ? <span style={{ color: "#a8a29e", marginLeft: 4 }}>/ {item.remolque}</span> : null}
+      </div>
     </div>
 
     {/* Nota existente (siempre visible si hay texto) */}

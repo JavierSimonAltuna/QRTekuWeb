@@ -541,14 +541,19 @@ def assign_next(loader_id: str) -> dict:
     if reserved:
         best_doc = reserved[0]
     else:
-        # Prioridad 2: cola normal del tipo correcto, no bloqueados
+        # Prioridad 2: cola normal del tipo correcto, no bloqueados.
+        # Solo consulta por status para evitar requerir índice compuesto en Firestore;
+        # el filtro de queue_type se aplica en Python.
         candidates = (
             _items_col()
             .where(filter=firestore.FieldFilter("status", "==", "queued"))
-            .where(filter=firestore.FieldFilter("queue_type", "==", qt))
             .get()
         )
-        eligible = [d for d in candidates if not d.to_dict().get("blocked")]
+        eligible = [
+            d for d in candidates
+            if d.to_dict().get("queue_type", "ambiente") == qt
+            and not d.to_dict().get("blocked")
+        ]
         if not eligible:
             return {"ok": False, "error": "No hay items en cola"}
 

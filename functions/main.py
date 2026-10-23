@@ -220,6 +220,7 @@ def _loader_current(loader_id: str):
     loader = Q.get_loader(loader_id)
     if not loader:
         return {"ok": False, "error": "Cargador no encontrado"}
+    qt = loader.get("queue_type", "ambiente")
     # Buscar item asignado actualmente
     docs = (
         Q._items_col()
@@ -236,7 +237,18 @@ def _loader_current(loader_id: str):
             item["numsup_count"] = count
         except Exception:
             pass
-    return {"ok": True, "loader": loader, "item": item}
+    # Contar cargas en cola del tipo del cargador (filtro en Python para evitar índice compuesto)
+    all_queued = (
+        Q._items_col()
+        .where(filter=fs_admin.FieldFilter("status", "==", "queued"))
+        .get()
+    )
+    queued_count = sum(
+        1 for d in all_queued
+        if d.to_dict().get("queue_type", "ambiente") == qt
+        and not d.to_dict().get("blocked")
+    )
+    return {"ok": True, "loader": loader, "item": item, "queued_count": queued_count}
 
 
 def _loader_request_next(loader_id: str):
