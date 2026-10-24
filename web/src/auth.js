@@ -47,6 +47,11 @@
     return firebase.auth().signInWithPopup(provider);
   }
 
+  async function signInWithEmail(email, password) {
+    if (!window.firebase) throw new Error("Firebase SDK no disponible");
+    return firebase.auth().signInWithEmailAndPassword(email, password);
+  }
+
   async function signOut() {
     if (!window.firebase) return;
     return firebase.auth().signOut();
@@ -71,6 +76,7 @@
     getIdToken: getIdToken,
     signInWithGoogle: signInWithGoogle,
     signInWithMicrosoft: signInWithMicrosoft,
+    signInWithEmail: signInWithEmail,
     signOut: signOut,
     onAuthStateChanged: onAuthStateChanged,
     getCurrentUser: getCurrentUser,
