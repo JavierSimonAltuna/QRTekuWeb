@@ -15,14 +15,26 @@
   }
 
   async function viaHttp(method, args) {
+    const headers = { "Content-Type": "application/json" };
+    if (window.PulsoAuth) {
+      const token = await window.PulsoAuth.getIdToken();
+      if (token) headers["Authorization"] = "Bearer " + token;
+    }
     const resp = await fetch(`/api/${method}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({ args: args || [], kwargs: {} }),
     });
     if (!resp.ok) {
       let detail = "";
-      try { detail = (await resp.json()).error || ""; } catch (_) {}
+      try {
+        const body = await resp.json();
+        detail = body.error || "";
+        if (resp.status === 401 && body.auth_required) {
+          // Token expirado o sesión cerrada → forzar re-login
+          if (window.PulsoAuth) window.PulsoAuth.signOut();
+        }
+      } catch (_) {}
       throw new Error(`HTTP ${resp.status} ${detail}`);
     }
     return resp.json();

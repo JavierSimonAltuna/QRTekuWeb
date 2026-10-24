@@ -56,6 +56,66 @@ def _cargas_sessions_col():
     return _db().collection("cargas_sessions")
 
 
+# ── Métodos exentos de autenticación SSO ──────────────────────────────────
+# El cargador usa PIN auth; check_auth es el handshake inicial de SSO.
+AUTH_EXEMPT_METHODS = frozenset({
+    "loader_login", "loader_current", "loader_request_next",
+    "loader_refresh_precintos", "loader_finish", "loader_set_muelle",
+    "check_auth",
+})
+
+
+def _verify_token(req) -> "dict | None":
+    """Verifica el Bearer token de Firebase Auth. Devuelve el decoded token o None."""
+    auth_header = req.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header[len("Bearer "):]
+    try:
+        from firebase_admin import auth as fb_auth
+        return fb_auth.verify_id_token(token)
+    except Exception as e:
+        print(f"[auth] verify_id_token failed: {e}")
+        return None
+
+
+def _is_email_allowed(email: str) -> bool:
+    """Comprueba si el email está en la lista de acceso de Firestore config/auth."""
+    try:
+        doc = _db().collection("config").document("auth").get()
+        if not doc.exists:
+            return True  # sin config = permitir todos los autenticados
+        data = doc.to_dict() or {}
+        allowed_emails = data.get("allowed_emails") or []
+        allowed_domains = data.get("allowed_domains") or []
+        if email in allowed_emails:
+            return True
+        domain = email.split("@")[-1].lower() if "@" in email else ""
+        if domain and domain in allowed_domains:
+            return True
+        if not allowed_emails and not allowed_domains:
+            return True  # listas vacías = sin restricción
+        return False
+    except Exception as e:
+        print(f"[auth] _is_email_allowed error: {e}")
+        return True  # fail-open
+
+
+def _check_auth(req) -> dict:
+    """Endpoint handshake SSO: verifica token y devuelve si el email está permitido."""
+    decoded = _verify_token(req)
+    if not decoded:
+        return {"ok": False, "allowed": False, "error": "Token inválido o ausente"}
+    email = decoded.get("email", "")
+    allowed = _is_email_allowed(email)
+    return {
+        "ok": True,
+        "allowed": allowed,
+        "email": email,
+        "display_name": decoded.get("name", ""),
+    }
+
+
 # ── Métodos permitidos ─────────────────────────────────────────────────────
 ALLOWED_METHODS = {
     # Cargador
@@ -74,6 +134,8 @@ ALLOWED_METHODS = {
     "export_cargas_csv", "export_queue_csv", "queue_fix_legacy",
     # Cargadores (gestión)
     "loader_upsert", "loader_remove",
+    # Auth SSO
+    "check_auth",
     # Info / diagnóstico
     "app_info", "get_odbc_diagnostics", "get_debug_log", "get_audit_log",
     "queue_debug",
@@ -1434,6 +1496,7 @@ HANDLERS = {
     "get_api_config":           lambda *a, **k: C.get_api_config(),
     "save_api_config":          lambda *a, **k: C.save_api_config(*a, **k),
     "test_api_connection":      lambda *a, **k: C.test_connection(),
+    "check_auth":               None,  # handled specially in dispatcher (needs req)
 }
 
 
@@ -1463,6 +1526,19 @@ def api(req: https_fn.Request) -> https_fn.Response:
 
     if method_name not in ALLOWED_METHODS:
         return _json_resp({"ok": False, "error": f"Método no permitido: {method_name}"}, 403)
+
+    # check_auth necesita req directamente (token + whitelist check)
+    if method_name == "check_auth":
+        return _json_resp(_check_auth(req), 200)
+
+    # Verificar autenticación SSO para métodos que no son del cargador
+    if method_name not in AUTH_EXEMPT_METHODS:
+        decoded = _verify_token(req)
+        if not decoded:
+            return _json_resp({"ok": False, "error": "No autorizado", "auth_required": True}, 401)
+        email = decoded.get("email", "")
+        if not _is_email_allowed(email):
+            return _json_resp({"ok": False, "error": "Acceso no permitido", "auth_required": True}, 403)
 
     handler = HANDLERS.get(method_name)
     if not handler:

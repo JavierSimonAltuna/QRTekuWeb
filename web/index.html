@@ -59,6 +59,10 @@
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<!-- Firebase SDK (auto-config vía Firebase Hosting) -->
+<script src="/__/firebase/10.14.1/firebase-app-compat.js"></script>
+<script src="/__/firebase/10.14.1/firebase-auth-compat.js"></script>
+<script src="/__/firebase/init.js"></script>
 </head>
 <body>
 <div id="__loading">
@@ -102,6 +106,7 @@
 </script>
 
 <script src="src/data.js"></script>
+<script src="src/auth.js"></script>
 <script src="src/api-shim.js"></script>
 <script type="text/babel" src="src/icons.jsx"></script>
 <script type="text/babel" src="src/qr-pattern.jsx"></script>
@@ -110,13 +115,39 @@
 <script type="text/babel" src="src/queue-panel.jsx"></script>
 <script type="text/babel" src="src/app.jsx"></script>
 <script type="text/babel" src="src/loader.jsx"></script>
+<script type="text/babel" src="src/login-screen.jsx"></script>
 
 <script type="text/babel" data-presets="env,react">
 (() => {
   const params = new URLSearchParams(location.search);
   const mode = params.get("mode") || "supervisor";
-  const Root = mode === "loader" ? window.LoaderApp : window.QRTekuApp;
-  ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
+
+  // El modo cargador usa PIN auth — sin SSO
+  if (mode === "loader") {
+    ReactDOM.createRoot(document.getElementById("root")).render(<window.LoaderApp />);
+    return;
+  }
+
+  // Modo supervisor: puerta de autenticación SSO
+  const AuthGate = () => {
+    const [authState, setAuthState] = React.useState("loading");
+
+    React.useEffect(() => {
+      if (!window.PulsoAuth) {
+        setAuthState("authenticated");
+        return;
+      }
+      window.PulsoAuth.onAuthStateChanged(user => {
+        setAuthState(user ? "authenticated" : "unauthenticated");
+      });
+    }, []);
+
+    if (authState === "loading") return null;
+    if (authState === "unauthenticated") return <window.LoginScreen />;
+    return <window.QRTekuApp />;
+  };
+
+  ReactDOM.createRoot(document.getElementById("root")).render(<AuthGate />);
 })();
 </script>
 </body>
