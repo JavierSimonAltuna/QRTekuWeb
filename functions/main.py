@@ -102,16 +102,14 @@ def _is_email_allowed(email: str) -> bool:
 
 
 def _check_auth(req) -> dict:
-    """Endpoint handshake SSO: verifica token y devuelve si el email está permitido."""
+    """Endpoint handshake SSO: verifica que el token de Firebase sea válido."""
     decoded = _verify_token(req)
     if not decoded:
         return {"ok": False, "allowed": False, "error": "Token inválido o ausente"}
-    email = decoded.get("email", "")
-    allowed = _is_email_allowed(email)
     return {
         "ok": True,
-        "allowed": allowed,
-        "email": email,
+        "allowed": True,
+        "email": decoded.get("email", ""),
         "display_name": decoded.get("name", ""),
     }
 
@@ -1531,14 +1529,12 @@ def api(req: https_fn.Request) -> https_fn.Response:
     if method_name == "check_auth":
         return _json_resp(_check_auth(req), 200)
 
-    # Verificar autenticación SSO para métodos que no son del cargador
+    # Verificar autenticación SSO para métodos que no son del cargador.
+    # El acceso se controla directamente desde Firebase Console (usuarios habilitados/deshabilitados).
     if method_name not in AUTH_EXEMPT_METHODS:
         decoded = _verify_token(req)
         if not decoded:
             return _json_resp({"ok": False, "error": "No autorizado", "auth_required": True}, 401)
-        email = decoded.get("email", "")
-        if not _is_email_allowed(email):
-            return _json_resp({"ok": False, "error": "Acceso no permitido", "auth_required": True}, 403)
 
     handler = HANDLERS.get(method_name)
     if not handler:
