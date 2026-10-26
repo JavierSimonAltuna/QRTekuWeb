@@ -57,10 +57,8 @@ def _cargas_sessions_col():
 
 
 # ── Métodos exentos de autenticación SSO ──────────────────────────────────
-# El cargador usa PIN auth; check_auth es el handshake inicial de SSO.
+# check_auth es el handshake inicial; todos los demás requieren token válido.
 AUTH_EXEMPT_METHODS = frozenset({
-    "loader_login", "loader_current", "loader_request_next",
-    "loader_refresh_precintos", "loader_finish", "loader_set_muelle",
     "check_auth",
 })
 
