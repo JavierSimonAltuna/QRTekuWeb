@@ -213,7 +213,6 @@ const QueuePanel = ({ pushToast }) => {
   const handleChangeQueueType = async (id, newType) => {
     const labelMap = { "refrigerado": "refrigerado ❄", "ambiente": "ambiente ☼", "congelado": "congelado ❄❄" };
     const label = labelMap[newType] || newType;
-    if (!confirm(`¿Mover este viaje a la cola de ${label}?`)) return;
     const r = await window.api.call("queue_change_queue_type", id, newType);
     if (r.ok) { pushToast(`Viaje movido a cola ${label}`, "success"); refresh(); }
     else pushToast(r.error || "Error", "error");
