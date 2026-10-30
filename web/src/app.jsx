@@ -450,11 +450,12 @@ const QRTekuApp = () => {
     if (idx === selectedIdx) { setSelectedIdx(null); setTabletPane("list"); return; }
     setSelectedIdx(idx);
     setTabletPane("detail");
-    if (!editing[idx]) {
-      const row = filtered[idx];
-      const state = initRowEdit(row);
+    const row = filtered[idx];
+    // Reinicializar si no hay estado o si el estado pertenece a otra fila
+    // (ocurre cuando el filtro cambia y otra fila ocupa la misma posición idx)
+    if (!editing[idx] || editing[idx]._rowN !== (row?.n ?? null)) {
+      const state = { ...initRowEdit(row), _rowN: row?.n ?? null };
       setEditing((e) => ({ ...e, [idx]: state }));
-      // Disparar ODBC lookup
       lookupCifAgencia(idx, row);
     }
   }, [selectedIdx, editing, filtered, initRowEdit, lookupCifAgencia]);
